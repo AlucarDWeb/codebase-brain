@@ -572,10 +572,16 @@ function orbitView(stage, nodes, links, iters) {
   // World coordinates are centred on the origin; the projection adds the screen centre.
   for (const n of nodes) { n.x -= 600; n.y -= 320; }
   simulate3d(nodes, links, Math.min(iters, 2500), nodes.length > 100 ? 40000 : 90000, nodes.length > 100 ? 110 : 190);
-  // Scale the settled layout so its farthest module sits inside the frame at zoom 1.
-  const reach = Math.max(1, ...nodes.map(n => Math.hypot(n.x, n.y, n.z)));
+  // Scale the settled layout by its typical spread, not its farthest module, so one
+  // outlier cannot shrink the cloud; outliers are then pulled back to the rim.
+  const dists = nodes.map(n => Math.hypot(n.x, n.y, n.z)).sort((a, b) => a - b);
+  const reach = Math.max(1, dists[Math.floor(dists.length * 0.85)] || 1);
   const fit = 250 / reach;
-  for (const n of nodes) { n.x *= fit; n.y *= fit; n.z *= fit; }
+  for (const n of nodes) {
+    n.x *= fit; n.y *= fit; n.z *= fit;
+    const d = Math.hypot(n.x, n.y, n.z);
+    if (d > 300) { const k = 300 / d; n.x *= k; n.y *= k; n.z *= k; }
+  }
   const css = getComputedStyle(document.documentElement);
   const color = v => css.getPropertyValue(v).trim();
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
