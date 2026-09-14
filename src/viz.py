@@ -585,7 +585,7 @@ function orbitView(stage, nodes, links, iters) {
   const css = getComputedStyle(document.documentElement);
   const color = v => css.getPropertyValue(v).trim();
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const view = { yaw: 0.6, pitch: -0.25, zoom: 1, spin: reduced ? 0 : 0.0025, dragging: null, hover: -1, last: null };
+  const view = { yaw: 0.6, pitch: -0.25, zoom: 1.3, spin: reduced ? 0 : 0.0025, dragging: null, hover: -1, last: null };
   let raf = 0, alive = true;
   const rot = () => {
     const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw), cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
