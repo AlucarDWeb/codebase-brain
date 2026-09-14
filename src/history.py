@@ -1375,6 +1375,8 @@ def slice_for_viz(hdb_path, recent=60, churn_limit=40, weeks_limit=26):
             "monthly": monthly(db),
             "churn": [list(r) for r in churn(db, since=year_ago, by="module", limit=churn_limit)],
             "churn_since": year_ago,
+            "churn90": [list(r) for r in churn(db, since=(datetime.date.today() - datetime.timedelta(days=90)).isoformat(),
+                                                by="module", limit=80)],
             "recent": [list(r) for r in commits_for(db, limit=recent)],
             "recent_narrated": narrated_commits(db, commits_for(db, limit=recent), m.get("remote_web", "")),
             "weeks": [{"week": w, "commits": n, **{"digest": week_digest(db, *week_bounds(w), m.get("remote_web", ""))}}

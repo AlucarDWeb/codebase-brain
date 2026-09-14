@@ -207,7 +207,10 @@ it. It gives you the places and the pull requests to read first, with the exact 
    idxg open
    ```
 
-   The explorer has six tabs: an overview, a cross-module call graph drawn in 3D that
+   The explorer has six tabs: an overview that answers four questions (what is this and
+   how current is it, what is happening this week, which modules are hotspots because
+   they change often and many others depend on them, where the code is by layer and
+   where to look next), a cross-module call graph drawn in 3D that
    rotates on its own (drag empty space to turn it, drag a module to move it, wheel to
    zoom, click to isolate; a flat view is one click away) with filters by layer, name and
    size and a search box that brings any module in with everything it calls or is called by, a symbol browser with callers and callees, dead-code

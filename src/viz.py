@@ -134,6 +134,13 @@ def slice_data(db, scope=None, limit=3000, edge_cap=60000, per_node_cap=45, deta
     cur = db.cursor()
     cur.row_factory = None
     meta = {r[0]: r[1] for r in cur.execute("SELECT key, value FROM meta")}
+    try:
+        import project as prj
+        stale, reason, _ = prj.staleness(meta)
+        meta["stale"] = "1" if stale else "0"
+        meta["stale_reason"] = reason
+    except Exception:
+        pass
     counts = {t: cur.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
               for t in ("symbols", "edges", "occurrences", "files", "units")}
     ekinds = dict(cur.execute("SELECT kind, COUNT(*) FROM edges GROUP BY kind ORDER BY 2 DESC").fetchall())
@@ -330,34 +337,131 @@ for (const [a, b, k, f, l, n] of D.edges) {
 /* ---------- overview ---------- */
 function overview() {
   const s = document.getElementById('overview');
-  const cov = D.meta.coverage_pct;
-  const tiles = [
-    ['symbols', D.counts.symbols], ['edges', D.counts.edges],
-    ['occurrences', D.counts.occurrences], ['indexed files', D.counts.files],
-    ['units', D.counts.units]
+  s.innerHTML = '';
+  const H = D.history;
+  const m = D.meta;
+  const link = (text, fn) => { const a = el('a', null, text); a.style.color = 'var(--accent2)'; a.style.cursor = 'pointer'; a.onclick = fn; return a; };
+
+  /* 1. what is this, can I trust it */
+  const state = el('div', 'card');
+  state.append(el('h2', null, 'what this is, and how current it is'));
+  const kv = el('div', 'kv');
+  const tracked = +(m.coverage_tracked || 0), covered = +(m.coverage_covered || 0);
+  const pct = m.coverage_pct != null ? m.coverage_pct : (tracked ? Math.round(1000 * covered / tracked) / 10 : null);
+  const rows = [
+    ['project', `${m.project || ''}  (${m.repo_root || ''})`],
+    ['code graph', `built ${(m.built_at || '').replace('T', ' ')} from ${(m.store_path || '').split(' ; ').length} index store${(m.store_path || '').includes(' ; ') ? 's' : ''}` +
+      (m.stale === '1' ? `. The compiler has written more since (${m.stale_reason}); run idxg refresh` : '. Up to date with the compiler')],
+    ['coverage', pct != null ? `${pct}% of tracked source files were compiled into the graph (${fmt(covered)} of ${fmt(tracked)}). The rest are invisible here: nothing that lives only in them can be found or traced.` : 'unknown'],
   ];
-  const t = el('div', 'tiles');
-  for (const [k, v] of tiles) {
-    const d = el('div', 'tile'); d.append(el('div', 'n', fmt(v)), el('div', 'k', k)); t.append(d);
+  if (H) rows.push(['history', `${fmt(+H.meta.count_commits)} commits on ${H.meta.branch} up to ${H.meta.last_day}, ${fmt(+H.meta.count_docs)} docs, read ${(H.meta.built_at || '').replace('T', ' ')}`]);
+  else rows.push(['history', 'not built; run idxg history build']);
+  for (const [k, v] of rows) kv.append(el('div', null, k), el('div', null, v));
+  state.append(kv);
+  s.append(state);
+
+  const g1 = el('div', 'grid2'); g1.style.marginTop = '14px';
+
+  /* 2. what is happening */
+  const now = el('div', 'card');
+  now.append(el('h2', null, 'what is happening'));
+  if (H && H.weeks && H.weeks.length) {
+    const w = H.weeks[H.weeks.length - 1];
+    const d = w.digest;
+    const head = el('div'); head.style.fontFamily = 'var(--mono)'; head.style.fontSize = '14px'; head.style.marginBottom = '4px';
+    head.textContent = `${d.window.label}: ${d.headline}`;
+    now.append(head);
+    const facts = el('div', 'loc'); facts.textContent = d.stats.map(x => `${x.value} ${x.label.toLowerCase()}`).join('  ·  ');
+    facts.style.marginBottom = '10px'; now.append(facts);
+    now.append(activityChart());
+    const list = el('div'); list.style.marginTop = '10px';
+    list.append(el('h2', null, 'most recent changes'));
+    for (const c of (H.recent_narrated || []).slice(0, 5)) {
+      const row = el('div'); row.style.marginBottom = '8px'; row.style.fontSize = '12px';
+      const first = c.text.split(/(?<=\\.)\\s/)[0].replace(/^On \\d{4}-\\d{2}-\\d{2} /, '');
+      row.append(el('span', 'sha', `${c.day}  `), document.createTextNode(first));
+      list.append(row);
+    }
+    now.append(list);
+    const more = el('div'); more.style.marginTop = '6px';
+    more.append(link('the whole week, every change explained', () => showTab('history'))); now.append(more);
+  } else {
+    now.append(el('div', 'empty', 'no history yet; run idxg history build'));
   }
-  s.append(t);
-  const g = el('div', 'grid2');
-  g.append(barCard('edges by kind', Object.entries(D.edge_kinds)));
-  g.append(barCard('symbol kinds (in repo)', Object.entries(D.sym_kinds)));
-  g.append(barCard('indexed files by layer', D.layers));
-  const c = el('div', 'card'); c.append(el('h2', null, 'top modules'));
+  g1.append(now);
+
+  /* 3. hotspots: change a lot and many depend on them */
+  const hot = el('div', 'card');
+  hot.append(el('h2', null, 'hotspots: modules that change often and that many others depend on'));
+  hot.append(el('div', 'loc', 'a bug here spreads furthest; commits are the last 90 days, dependents are modules calling into it'));
+  const dependents = new Map();
+  for (const [a, b] of D.mod_edges) { if (!dependents.has(b)) dependents.set(b, new Set()); dependents.get(b).add(a); }
+  const churn = new Map((H && H.churn90 || []).map(r => [r[0], r[1]]));
+  const cand = [...churn.keys()].filter(mname => !(D.mod_layers || {})[mname] || (D.mod_layers || {})[mname] !== 'Tests')
+    .map(mname => ({ m: mname, c: churn.get(mname) || 0, d: (dependents.get(mname) || new Set()).size }))
+    .filter(x => x.c > 0 && x.d > 0)
+    .sort((a, b) => (b.c * b.d) - (a.c * a.d)).slice(0, 12);
+  if (!cand.length) hot.append(el('div', 'empty', H ? 'no module both changed and has dependents in the window' : 'needs the history db'));
+  const maxC = Math.max(1, ...cand.map(x => x.c)), maxD = Math.max(1, ...cand.map(x => x.d));
   const tb = el('table');
-  tb.innerHTML = '<thead><tr><th>module</th><th class="num">symbols</th><th class="num">calls in</th>' +
-    '<th class="num">calls out</th></tr></thead>';
+  tb.innerHTML = '<thead><tr><th>module</th><th>commits, 90 days</th><th>modules depending on it</th></tr></thead>';
   const body = el('tbody');
-  for (const [m, n, ci, co] of D.modules.slice(0, 25)) {
+  for (const x of cand) {
     const tr = el('tr');
-    const a = el('td'); const link = el('a', null, m); link.style.cursor = 'pointer';
-    link.style.color = 'var(--accent2)'; link.onclick = () => { showTab('symbols'); setModule(m); };
-    a.append(link);
-    tr.append(a, numTd(n), numTd(ci), numTd(co)); body.append(tr);
+    const td = el('td'); td.append(link(x.m, () => { showTab('modules'); const iso = document.getElementById('modiso'); if (iso) { iso.value = x.m; iso.dispatchEvent(new Event('change')); } })); tr.append(td);
+    for (const [v, mx, color] of [[x.c, maxC, 'var(--warn)'], [x.d, maxD, 'var(--accent)']]) {
+      const cell = el('td'); const bar = el('span', 'bar'); bar.style.width = Math.max(2, 110 * v / mx) + 'px'; bar.style.background = color;
+      cell.append(bar, el('span', 'loc', `  ${fmt(v)}`)); tr.append(cell);
+    }
+    body.append(tr);
   }
-  tb.append(body); c.append(tb); g.append(c); s.append(g);
+  tb.append(body); hot.append(tb);
+  g1.append(hot);
+  s.append(g1);
+
+  const g2 = el('div', 'grid2'); g2.style.marginTop = '14px';
+
+  /* 4a. where the code is: layers */
+  const lay = el('div', 'card');
+  lay.append(el('h2', null, 'where the code is'));
+  const byLayer = new Map();
+  for (const [mod, n] of D.modules) { const L = (D.mod_layers || {})[mod] || 'Other'; const e = byLayer.get(L) || { mods: 0, syms: 0 }; e.mods++; e.syms += n; byLayer.set(L, e); }
+  const layers = [...byLayer.entries()].sort((a, b) => b[1].syms - a[1].syms);
+  const totalSyms = layers.reduce((t, [, e]) => t + e.syms, 0) || 1;
+  const stack = el('div'); stack.style.display = 'flex'; stack.style.height = '14px'; stack.style.borderRadius = '4px'; stack.style.overflow = 'hidden'; stack.style.margin = '6px 0 10px'; stack.style.gap = '2px';
+  layers.forEach(([L, e], i) => { const seg = el('span'); seg.style.flex = `${e.syms} 0 0`; seg.style.background = LAYER_COLORS[i % LAYER_COLORS.length]; seg.title = `${L}: ${fmt(e.syms)} symbols`; stack.append(seg); });
+  lay.append(stack);
+  const lt = el('table'); const lb = el('tbody');
+  layers.forEach(([L, e], i) => {
+    const tr = el('tr'); const td = el('td');
+    const dot = el('i'); dot.style.cssText = `display:inline-block;width:9px;height:9px;border-radius:50%;background:${LAYER_COLORS[i % LAYER_COLORS.length]};margin-right:6px`;
+    td.append(dot, link(L, () => { showTab('modules'); modOpts.layer = L; const sel = document.getElementById('modlayer'); if (sel) { sel.value = L; sel.dispatchEvent(new Event('input')); } }));
+    tr.append(td, numTd(e.mods), el('td', 'loc', 'modules'), numTd(e.syms), el('td', 'loc', `symbols, ${Math.round(100 * e.syms / totalSyms)}%`));
+    lb.append(tr);
+  });
+  lt.append(lb); lay.append(lt);
+  lay.append(el('div', 'loc', "layers come from where each module's files live; click one to see it in the module graph"));
+  g2.append(lay);
+
+  /* 4b. where to look */
+  const look = el('div', 'card');
+  look.append(el('h2', null, 'where to look'));
+  const items = el('div'); items.style.display = 'grid'; items.style.gap = '10px'; items.style.fontSize = '12px';
+  const item = (title, text, fn) => { const d = el('div'); d.append(link(title, fn)); const t = el('div', 'loc', text); d.append(t); return d; };
+  items.append(item(`${fmt(D.dead_total)} dead-code candidates`, 'symbols nothing in the compiled build reaches; a candidate list, not a verdict', () => showTab('dead')));
+  items.append(item(`${fmt(D.slice_size)} symbols in the browser`, 'the most connected ones repo-wide, with callers and callees', () => showTab('symbols')));
+  if (H && H.docs && H.docs.length) {
+    const recent = [...H.docs].filter(d => d[4]).sort((a, b) => b[4] < a[4] ? -1 : 1).slice(0, 3);
+    items.append(item(`${fmt(H.docs.length)} documents the repo writes about itself`, 'most recently changed: ' + recent.map(d => `${d[1] || d[0]} (${d[4]})`).join(', '), () => showTab('docs')));
+  }
+  if (H) items.append(item('the story, period by period', `${H.narrative.length} ${H.granularity}s of computed history, from ${H.meta.first_day}`, () => showTab('history')));
+  look.append(items);
+  g2.append(look);
+  s.append(g2);
+
+  const foot = el('div', 'loc'); foot.style.marginTop = '14px';
+  foot.textContent = `graph: ${fmt(D.counts.symbols)} symbols, ${fmt(D.counts.edges)} edges, ${fmt(D.counts.occurrences)} occurrences, ${fmt(D.counts.files)} indexed files, ${fmt(D.counts.units)} compile units. Table and column reference: idxg schema.`;
+  s.append(foot);
 }
 const numTd = v => { const d = el('td', 'num', fmt(v)); return d; };
 function barCard(title, pairs) {
