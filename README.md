@@ -42,10 +42,12 @@ logged in; everything else works without it.
 
 ## How an agent uses it
 
-`./install.sh` registers the MCP server with Claude Code, and `idxg init` in a project
-writes two things into it: a project skill (`.claude/skills/project-brain/SKILL.md`) that
-says when to reach for the graph instead of grep and which caveats to respect, and a block
-in the project's CLAUDE.md that points at it. From then on the agent picks the tools by
+`./install.sh` registers the MCP server with Claude Code and links the `codebase-brain`
+skill, which holds the rules, the tool table and the caveats. `idxg init` in a project
+writes two short things into it: a project skill (`.claude/skills/project-brain/SKILL.md`)
+with the facts specific to that project (coverage, largest modules, history reach) and a
+`## Project notes` section that is yours, and a block in the project's CLAUDE.md that
+points at both. From then on the agent picks the tools by
 itself, and both files tell it to prefer the MCP tools over running `idxg` in a shell when
 the server is connected. Nothing in the agent's prompt needs to change.
 

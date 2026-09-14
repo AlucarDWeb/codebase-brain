@@ -1232,99 +1232,48 @@ def install_project_skill(root, db_file):
     os.makedirs(d, exist_ok=True)
     for legacy in LEGACY_PROJECT_SKILLS:
         _remove_skill_dir(os.path.join(root, ".claude", "skills", legacy), keep_notes_into=d)
+    tracked, covered = int(m.get("coverage_tracked") or 0), int(m.get("coverage_covered") or 0)
+    coverage = (f"{100 * covered / tracked:.0f}% of tracked source files ({covered:,} of {tracked:,}) were compiled "
+                f"into the graph; symbols that live only in the rest cannot be found or traced here."
+                if tracked else "coverage unknown; run `idxg status`.")
+    hist = _history_module()
+    hp = hist.history_db_for(db_file)
+    history_line = "History is not built yet; `idxg history build` adds it."
+    if os.path.exists(hp):
+        h = hist.connect(hp)
+        hm = hist.meta(h)
+        h.close()
+        history_line = (f"History covers {int(hm.get('count_commits') or 0):,} commits on `{hm.get('branch')}` from "
+                        f"{hm.get('first_day')} to {hm.get('last_day')}, with pull request descriptions, and "
+                        f"{int(hm.get('count_docs') or 0)} markdown documents from the repository.")
+    lang_line = ", ".join(f"{k} {v:,}" for k, v in sorted(langs.items(), key=lambda kv: -kv[1]) if k)
     body = f"""---
 name: project-brain
-description: Query {name}'s compiler-accurate code graph, its commit history and its own docs instead of grepping. Use for who calls X, what X calls, where X is referenced, override and conformance chains, module coupling, dead-code candidates, or any structural question about this codebase. Also covers refreshing the index after a build.
+description: Facts about {name}'s code graph, commit history and docs as indexed by codebase-brain (coverage, largest modules, history reach) plus this project's own notes. Use together with the codebase-brain skill for who calls X, who changed X and why, what shipped, crash triage, or what the repo's docs say.
 ---
 
-# {name} code index
+# {name} in codebase-brain
 
-This project can be queried as a graph of its own source, extracted from the compiler's
-index store: symbols, calls, references, overrides and conformances as the compiler
-resolved them, each edge carrying the exact `file:line` of the relation. On the machine
-where this was generated it held roughly {n['symbols']:,} symbols and {n['edges']:,} edges
-across {n['files']:,} files; run `idxg status` for the current numbers, the database path,
-and how much of the repo the last build actually covered.
+The rules, the tool table and the caveats are in the `codebase-brain` skill; this file
+holds only what is specific to {name}. Prefer the `codebase-brain` MCP tools when the
+server is connected; `idxg` in a shell is the fallback. If `idxg` is missing, install it
+from https://github.com/AlucarDWeb/codebase-brain and run `idxg init` here.
 
-If `idxg` is missing, install it from
-https://github.com/AlucarDWeb/codebase-brain and run `idxg init` here.
+## What the graph holds for this project
 
-## MCP first
+- {n['symbols']:,} symbols and {n['edges']:,} edges across {n['files']:,} indexed files ({lang_line}),
+  as of the last build on this machine; `index_status` gives the current numbers.
+- {coverage}
+- {history_line}
+- Largest modules: {', '.join(mods[:12])}.
 
-The `codebase-brain` MCP server is registered in Claude Code and exposes this graph as tools.
-When it is connected, answer with the tools, not with `idxg` in a shell:
-
-| Question | MCP tool |
-|---|---|
-| who calls this, what does it call, override and conformance chains | `trace_path` |
-| find a symbol by words, regex, kind, module or file | `search_graph` |
-| every use of a symbol, with roles | `find_references` |
-| read a definition | `get_code_snippet` |
-| was this file compiled at all, before claiming "unused" | `check_index_coverage` |
-| who changed this and why, in which PR | `get_history` (with `narrate`), `get_commit` |
-| a crash report or stack trace | `triage_crash`, then `get_commit` on the PRs it names |
-| what shipped this week, how the project evolved | `get_digest`, `get_timeline` |
-| what the repo's own docs say | `search_docs`, `list_docs`, `get_doc` |
-| is the graph fresh, what does it cover | `index_status` |
-
-Every tool caps its payload and says when it truncated. The `idxg` commands below give the
-same answers and are the fallback when the server is not connected.
-
-## Use it before grepping
-
-```bash
-idxg trace <Symbol> --direction in --first     # who calls it, with call sites
-idxg trace <Symbol> --direction out --first    # what it calls
-idxg refs <Symbol>                             # every occurrence, with roles
-idxg search "<words>"                          # full text over camel-split names
-idxg search --name '<regex>' --kind Struct,Class
-idxg snippet <Symbol>                          # definition from disk
-idxg arch                                      # layers, modules, hotspots
-idxg sql "SELECT ..."                          # raw SQL, see idxg schema
-idxg history log --symbol <Symbol>             # commits that touched its file, with PRs
-idxg history log --module <Module> --since 2026-01-01
-idxg history log --narrate --since <date>      # one paragraph per commit: who, what, why
-idxg history show #<PR>                        # one change in full: PR description, files, modules
-idxg history digest [--week 2026-W36]          # the week, every change narrated, by area
-idxg crash <trace> --since <release tag>       # per frame: symbol, callers, commits since the tag
-idxg history churn --by module                 # where change concentrated this year
-idxg history timeline                          # the project's history in prose
-idxg docs search "<words>"                     # the repo's own markdown docs, full text
-idxg docs list --module <Module>               # a module's README, CLAUDE.md, design docs
-```
-
-Add `--json` for machine-readable output. Symbols resolve by bare name, `Module.Name`, or
-USR; ambiguous names list candidates unless you pass `--first`.
-
-## Rules for this project
-
-- Structural questions go through the graph, not ripgrep. Ripgrep is for literal text,
-  comments, strings, and files the build never compiled.
-- Before claiming nothing references a symbol, run `idxg coverage <path>`. A file with no
-  index records was never compiled in the indexed build; absence there proves nothing.
-- The graph is a snapshot of the last compile. After edits or a build, run `idxg refresh`.
-  Line numbers drift until you do.
-- `REFERENCES` edges are broad (enclosing symbol to everything it mentions, type
-  annotations included). Default to `--kind CALLS` and add `REFERENCES` deliberately.
-- Swift properties also exist as `getter:`/`setter:` methods; call edges land on the
-  accessor. Use `--kind CALLS,ACCESSOR_OF` when a property looks unused.
-- History is the main branch's `git log`, one row per merge. Module attribution follows
-  the compiled index, so a commit to a file the build never compiled has no module. For
-  "why was this done", read the commit body with `idxg history show`.
-- Repo docs are the tracked markdown files; `published` is a file's last commit date,
-  not the date its content is true. Prefer the code graph when the two disagree.
-- For a crash, run `idxg crash` first, then read the PR bodies it lists with
-  `idxg history show`. It shows what changed near the crash, never why it crashed.
-
-Largest modules: {', '.join(mods[:12])}.
-
-Visual explorer: `idxg open` (cross-module call graph, symbol browser).
+Explorer: `idxg open` (overview, module graph, symbols, dead code, history, docs).
 
 {NOTES_MARKER}
 
 Anything below this line is yours: project-specific gotchas, build quirks, which targets
-the index actually covers. `idxg init` regenerates everything above it and leaves this
-section untouched.
+the index actually covers, names the team uses. `idxg init` regenerates everything above
+it and leaves this section untouched.
 """
     path = os.path.join(d, "SKILL.md")
     keep = ""
@@ -1344,43 +1293,19 @@ def install_claude_md(root, db_file, target=None):
     m, n, _, _ = project_stats(db_file)
     name = m.get("project") or os.path.basename(root)
     note = f"""{CLAUDE_START}
-## Code index and history (codebase-brain)
+## Code graph, history and docs (codebase-brain)
 
-This repo can be queried as a compiler-accurate code graph, built from the index store
-the compiler already writes. `idxg status` prints the database path and coverage.
-
-**Check it before exploring the code.** For any question about how this codebase is
-wired, who calls what, where something is used, what a change would affect, which
-modules depend on which, who changed something and why, or what a crash report points
-at, query the graph first and fall back to ripgrep only for literal text or files the
-build never compiled.
-
-**Use the MCP server, not the shell.** The `codebase-brain` MCP server is registered in
-Claude Code. When it is connected, call its tools directly: `trace_path` for callers and
-callees, `search_graph` to find a symbol, `find_references` for every use,
-`get_code_snippet` to read a definition, `check_index_coverage` before any "unused" claim,
-`get_history` (with `narrate`) and `get_commit` for who changed what and why, `triage_crash`
-for a stack trace, `get_digest` and `get_timeline` for what shipped, `search_docs` and
-`get_doc` for the repo's own docs, `index_status` for freshness. The `idxg` commands below
-are the same functions for a shell, to be used only when the server is not connected.
-
-```bash
-idxg trace <Symbol> --direction in --first    # callers, with call sites
-idxg trace <Symbol> --direction out --first   # callees
-idxg refs <Symbol>                            # all occurrences with roles
-idxg search "<words>" | idxg search --name '<regex>' --kind Struct,Class
-idxg arch                                     # module coupling and hotspots
-idxg coverage <path>                          # what the index actually covers
-idxg refresh                                  # reindex after a build or edits
-idxg history log --symbol <Symbol>            # who changed it, when, in which PR
-idxg history timeline                         # the project's history in prose
-idxg docs search "<words>"                    # the repo's own docs, full text
-```
-
-The graph reflects the last compile, so refresh after building, and treat a file with no
-index records as unproven rather than unused. Details and caveats live in
-`.claude/skills/project-brain/SKILL.md`. Missing `idxg`? Install it from
-https://github.com/AlucarDWeb/codebase-brain and run `idxg init` here.
+This repository is indexed by codebase-brain: a compiler-accurate code graph, the main
+branch's commit history with pull request descriptions, and the repository's own docs.
+For any question about who calls what, where something is used, what a change would
+affect, who changed something and why, what shipped, or what a crash report points at,
+ask the graph before reading or grepping code. Use the `codebase-brain` MCP tools when the
+server is connected (`trace_path`, `search_graph`, `get_history`, `triage_crash`,
+`search_docs`, ...); `idxg` in a shell is the fallback. The graph is a snapshot of the last
+compile and covers only what was compiled, so treat a file with no index records as
+unproven rather than unused. Rules and tool table: the `codebase-brain` skill. This
+project's facts and notes: `.claude/skills/project-brain/SKILL.md`. Missing `idxg`?
+Install it from https://github.com/AlucarDWeb/codebase-brain and run `idxg init` here.
 {CLAUDE_END}"""
     path = target or os.path.join(root, "CLAUDE.md")
     existing = ""
