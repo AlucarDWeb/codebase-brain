@@ -61,6 +61,14 @@ input[type=text],select{background:var(--panel2);border:1px solid var(--line);co
 .tree a{color:var(--accent2);text-decoration:none;cursor:pointer}
 .tree a:hover{text-decoration:underline}
 svg{width:100%;height:420px;background:var(--panel);border:1px solid var(--line);border-radius:6px}
+canvas.orbit{width:100%;height:640px;display:block;background:var(--panel);border:1px solid var(--line);border-radius:6px;cursor:grab;touch-action:none}
+canvas.orbit.dragging{cursor:grabbing}
+.orbit-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin:8px 0 0}
+.orbit-legend span{display:inline-flex;align-items:center;gap:5px}
+.orbit-legend i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.seg button{background:var(--panel2);border:none;color:var(--dim);font-family:var(--mono);font-size:11px;padding:5px 10px;cursor:pointer}
+.seg button.on{background:var(--accent);color:var(--bg)}
 svg text{font-family:var(--mono);font-size:10px;fill:var(--fg)}
 svg line{stroke:var(--line)}
 .empty{color:var(--dim);padding:20px 0}
@@ -368,7 +376,9 @@ function barCard(title, pairs) {
 
 /* ---------- module graph ---------- */
 let modState = null;
-const modOpts = { layer: '', q: '', top: 45, minCalls: 8, pin: '' };
+const modOpts = { layer: '', q: '', top: 45, minCalls: 8, pin: '', view: 'orbit' };
+const LAYER_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#4caf50', '#9085e9', '#e66767'];
+let orbit = null;
 function modulesTab() {
   const s = document.getElementById('modules');
   s.innerHTML = '';
@@ -376,8 +386,15 @@ function modulesTab() {
   const head = el('div');
   head.style.display = 'flex'; head.style.alignItems = 'baseline'; head.style.gap = '10px'; head.style.flexWrap = 'wrap';
   head.append(el('h2', null, 'cross-module call graph'));
-  const hint = el('span', 'loc', 'click a module to isolate its calls, click empty space to reset');
-  hint.style.marginLeft = 'auto'; head.append(hint);
+  const seg = el('div', 'seg');
+  for (const [v, label] of [['orbit', 'orbit'], ['flat', 'flat']]) {
+    const b = el('button', modOpts.view === v ? 'on' : '', label);
+    b.onclick = () => { modOpts.view = v; for (const x of seg.children) x.classList.toggle('on', x === b); rebuild(); };
+    seg.append(b);
+  }
+  head.append(seg);
+  const hint = el('span', 'loc', 'drag empty space to rotate, drag a module to move it, wheel to zoom, click to isolate');
+  hint.id = 'modhint'; hint.style.marginLeft = 'auto'; head.append(hint);
   wrap.append(head);
   const filters = el('div', 'filters');
   const layers = [...new Set(Object.values(D.mod_layers || {}))].sort();
@@ -389,10 +406,10 @@ function modulesTab() {
     <select id="modmin"><option value="8">pairs with 8+ call sites</option><option value="3">pairs with 3+ call sites</option><option value="1">every pair</option></select>`;
   wrap.append(filters);
   const count = el('div', 'loc'); count.id = 'modcount'; count.style.marginBottom = '6px'; wrap.append(count);
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 1200 640'); svg.style.height = '640px';
-  wrap.append(svg);
+  const stage = el('div'); stage.id = 'modstage'; wrap.append(stage);
+  const legend = el('div', 'orbit-legend'); legend.id = 'modlegend'; wrap.append(legend);
   s.append(wrap);
+  const svg = { stage };
   const info = el('div', 'card'); info.id = 'modinfo'; info.style.marginTop = '14px';
   info.append(el('div', 'empty', 'no module selected'));
   s.append(info);
@@ -400,14 +417,14 @@ function modulesTab() {
   document.getElementById('modq').value = modOpts.q;
   document.getElementById('modtop').value = String(modOpts.top);
   document.getElementById('modmin').value = String(modOpts.minCalls);
-  const rebuild = () => {
+  function rebuild() {
     modOpts.layer = document.getElementById('modlayer').value;
     modOpts.q = document.getElementById('modq').value.trim();
     modOpts.top = +document.getElementById('modtop').value;
     modOpts.minCalls = +document.getElementById('modmin').value;
     buildModuleGraph(svg);
     selectModule(null);
-  };
+  }
   for (const id of ['modlayer', 'modq', 'modtop', 'modmin']) document.getElementById(id).addEventListener('input', rebuild);
   const iso = document.getElementById('modiso');
   iso.value = modOpts.pin;
@@ -432,8 +449,9 @@ function modulesTab() {
   if (modOpts.pin && modState.idx.has(modOpts.pin)) selectModule(modState.idx.get(modOpts.pin));
 }
 
-function buildModuleGraph(svg) {
-  svg.innerHTML = '';
+function buildModuleGraph(holder) {
+  if (orbit) { orbit.stop(); orbit = null; }
+  holder.stage.innerHTML = '';
   const size = new Map(D.modules.map(([m, n]) => [m, n]));
   const layerOf = m => (D.mod_layers || {})[m] || 'Other';
   let re = null, sub = '';
@@ -468,7 +486,17 @@ function buildModuleGraph(svg) {
     y: 320 + 260 * Math.sin(2 * Math.PI * i / names.length), vx: 0, vy: 0 }));
   // Layout cost is n squared per iteration, so the iteration count shrinks as the set grows.
   const iters = Math.max(400, Math.min(9000, Math.round(2e7 / Math.max(1, names.length * names.length))));
-  simulate(nodes, links, 1200, 640, 320, iters, names.length > 100 ? 1600 : 9000, names.length > 100 ? 90 : 210);
+  const layers = [...new Set(D.modules.map(([m]) => layerOf(m)))].sort();
+  const colorOf = m => LAYER_COLORS[layers.indexOf(layerOf(m)) % LAYER_COLORS.length];
+  const legend = document.getElementById('modlegend');
+  legend.innerHTML = '';
+  for (const l of layers.filter(l => names.some(n => layerOf(n) === l))) {
+    const sp = el('span'); const dot = el('i'); dot.style.background = LAYER_COLORS[layers.indexOf(l) % LAYER_COLORS.length];
+    sp.append(dot, document.createTextNode(l)); legend.append(sp);
+  }
+  document.getElementById('modhint').textContent = modOpts.view === 'orbit'
+    ? 'drag empty space to rotate, drag a module to move it, wheel to zoom, click to isolate'
+    : 'click a module to isolate its calls, click empty space to reset';
   document.getElementById('modcount').textContent =
     (modOpts.pin ? `${modOpts.pin} with its partners; ` : '') +
     `${names.length} of ${total} modules${modOpts.layer ? ` in ${modOpts.layer}` : ''}` +
@@ -476,6 +504,15 @@ function buildModuleGraph(svg) {
     ` (${D.modules.length} modules in the graph)`;
 
   const maxW = Math.max(1, ...links.map(l => l.n));
+  if (modOpts.view === 'orbit') {
+    modState = { nodes, links, size, idx, names, maxW, sel: null, layerOf, colorOf, svg: holder.stage, orbit: true };
+    orbit = orbitView(holder.stage, nodes, links, iters);
+    return;
+  }
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 1200 640'); svg.style.height = '640px';
+  holder.stage.append(svg);
+  simulate(nodes, links, 1200, 640, 320, iters, names.length > 100 ? 1600 : 9000, names.length > 100 ? 90 : 210);
   const NS = 'http://www.w3.org/2000/svg';
   const linkEls = links.map(l => {
     const ln = document.createElementNS(NS, 'line');
@@ -500,11 +537,154 @@ function buildModuleGraph(svg) {
     return { g, ci, tx };
   });
   svg.onclick = () => selectModule(null);
-  modState = { svg, nodes, links, linkEls, nodeEls, size, idx, names, maxW, sel: null, layerOf };
+  modState = { svg, nodes, links, linkEls, nodeEls, size, idx, names, maxW, sel: null, layerOf, colorOf };
   paintModules();
 }
 
+/* ---------- orbit view: the module graph in 3D on a canvas ---------- */
+function simulate3d(nodes, links, iters, repel, dist) {
+  for (const n of nodes) { n.z = (Math.random() - 0.5) * 300; n.vz = 0; }
+  for (let it = 0; it < iters; it++) {
+    const k = 1 - it / iters;
+    for (const l of links) {
+      const a = nodes[l.s], b = nodes[l.t];
+      let dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, d = Math.hypot(dx, dy, dz) || 1;
+      const f = (d - dist) * 0.012 * k * Math.min(1, l.n / 40 + .3);
+      dx /= d; dy /= d; dz /= d;
+      a.vx += dx * f; a.vy += dy * f; a.vz += dz * f; b.vx -= dx * f; b.vy -= dy * f; b.vz -= dz * f;
+    }
+    for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      let dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, d2 = dx * dx + dy * dy + dz * dz || 1;
+      const f = repel * k / d2, d = Math.sqrt(d2); dx /= d; dy /= d; dz /= d;
+      a.vx -= dx * f; a.vy -= dy * f; a.vz -= dz * f; b.vx += dx * f; b.vy += dy * f; b.vz += dz * f;
+    }
+    for (const n of nodes) {
+      n.vx += -n.x * 0.004 * k; n.vy += -n.y * 0.004 * k; n.vz += -n.z * 0.004 * k;
+      n.x += n.vx * .5; n.y += n.vy * .5; n.z += n.vz * .5; n.vx *= .82; n.vy *= .82; n.vz *= .82;
+    }
+  }
+}
+
+function orbitView(stage, nodes, links, iters) {
+  const canvas = document.createElement('canvas'); canvas.className = 'orbit';
+  stage.append(canvas);
+  // World coordinates are centred on the origin; the projection adds the screen centre.
+  for (const n of nodes) { n.x -= 600; n.y -= 320; }
+  simulate3d(nodes, links, Math.min(iters, 2500), nodes.length > 100 ? 40000 : 90000, nodes.length > 100 ? 110 : 190);
+  // Scale the settled layout so its farthest module sits inside the frame at zoom 1.
+  const reach = Math.max(1, ...nodes.map(n => Math.hypot(n.x, n.y, n.z)));
+  const fit = 250 / reach;
+  for (const n of nodes) { n.x *= fit; n.y *= fit; n.z *= fit; }
+  const css = getComputedStyle(document.documentElement);
+  const color = v => css.getPropertyValue(v).trim();
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const view = { yaw: 0.6, pitch: -0.25, zoom: 1, spin: reduced ? 0 : 0.0025, dragging: null, hover: -1, last: null };
+  let raf = 0, alive = true;
+  const rot = () => {
+    const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw), cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+    // rows of R = Rx(pitch) * Ry(yaw)
+    return [[cy, 0, sy], [sy * sp, cp, -cy * sp], [-sy * cp, sp, cy * cp]];
+  };
+  const project = (n, R, W, H) => {
+    const x = R[0][0] * n.x + R[0][1] * n.y + R[0][2] * n.z;
+    const y = R[1][0] * n.x + R[1][1] * n.y + R[1][2] * n.z;
+    const z = R[2][0] * n.x + R[2][1] * n.y + R[2][2] * n.z;
+    const persp = 900 / (900 - z * view.zoom);
+    return { sx: W / 2 + x * view.zoom * persp, sy: H / 2 + y * view.zoom * persp, depth: z, scale: persp };
+  };
+  function frame() {
+    if (!alive) return;
+    const W = canvas.clientWidth || 1200, H = 640, dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    }
+    if (!view.dragging && view.spin) view.yaw += view.spin;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const R = rot();
+    const P = nodes.map(n => project(n, R, W, H));
+    const sel = modState.sel, touching = new Set();
+    let localMax = 1;
+    if (sel !== null) { for (const l of links) { if (l.s === sel) { touching.add(l.t); localMax = Math.max(localMax, l.n); } if (l.t === sel) { touching.add(l.s); localMax = Math.max(localMax, l.n); } } touching.add(sel); }
+    const lineColor = color('--line'), accent = color('--accent'), warn = color('--warn'), fg = color('--fg'), dim = color('--dim'), pink = color('--pink');
+    ctx.lineCap = 'round';
+    for (const l of links) {
+      const a = P[l.s], b = P[l.t];
+      const on = sel === null || l.s === sel || l.t === sel;
+      const depth = (a.depth + b.depth) / 2;
+      const fade = 0.35 + 0.65 * (depth + 300) / 600;
+      ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy);
+      if (sel === null) { ctx.strokeStyle = color('--accent2'); ctx.globalAlpha = 0.18 * fade; ctx.lineWidth = 0.4 + 2.2 * l.n / modState.maxW; }
+      else if (on) { ctx.strokeStyle = l.s === sel ? warn : accent; ctx.globalAlpha = 0.95; ctx.lineWidth = 1.8 + 4.5 * Math.sqrt(l.n / localMax); }
+      else { ctx.strokeStyle = lineColor; ctx.globalAlpha = 0.06; ctx.lineWidth = 0.4; }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    const order = P.map((p, i) => i).sort((i, j) => P[i].depth - P[j].depth);
+    ctx.font = '10px ' + css.getPropertyValue('--mono');
+    for (const i of order) {
+      const p = P[i], n = nodes[i];
+      const r = Math.max(2, n.r * p.scale * Math.max(0.6, view.zoom));
+      const near = sel === null || touching.has(i);
+      const isSel = i === sel, isHover = i === view.hover;
+      const fade = 0.45 + 0.55 * (p.depth + 300) / 600;
+      ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = isSel ? pink : modState.colorOf(n.n);
+      ctx.globalAlpha = (near ? 0.85 : 0.12) * fade; ctx.fill();
+      ctx.globalAlpha = near ? fade : 0.15; ctx.lineWidth = isSel || isHover ? 2 : 1;
+      ctx.strokeStyle = isSel ? pink : isHover ? fg : modState.colorOf(n.n); ctx.stroke();
+      const showLabel = isSel || isHover || (near && (nodes.length <= 60 || r >= 6 || sel !== null));
+      if (showLabel) {
+        ctx.globalAlpha = near ? Math.min(1, fade + 0.2) : 0.3;
+        ctx.fillStyle = isSel ? pink : (r < 5 && sel === null ? dim : fg);
+        ctx.fillText(n.n, p.sx + r + 4, p.sy + 3);
+      }
+    }
+    ctx.globalAlpha = 1;
+    view.P = P;
+    raf = requestAnimationFrame(frame);
+  }
+  const hit = (mx, my) => {
+    if (!view.P) return -1;
+    let best = -1, bd = 1e9;
+    view.P.forEach((p, i) => { const d = Math.hypot(p.sx - mx, p.sy - my); const r = Math.max(6, nodes[i].r * p.scale) + 3; if (d < r && d < bd) { bd = d; best = i; } });
+    return best;
+  };
+  const pos = ev => { const b = canvas.getBoundingClientRect(); return [ev.clientX - b.left, ev.clientY - b.top]; };
+  canvas.addEventListener('pointerdown', ev => {
+    const [mx, my] = pos(ev); const i = hit(mx, my);
+    view.dragging = { node: i, mx, my, moved: false }; view.last = [mx, my];
+    canvas.classList.add('dragging'); canvas.setPointerCapture(ev.pointerId);
+  });
+  canvas.addEventListener('pointermove', ev => {
+    const [mx, my] = pos(ev);
+    if (!view.dragging) { const h = hit(mx, my); if (h !== view.hover) { view.hover = h; canvas.style.cursor = h >= 0 ? 'pointer' : 'grab'; } return; }
+    const dx = mx - view.last[0], dy = my - view.last[1]; view.last = [mx, my];
+    if (Math.abs(mx - view.dragging.mx) + Math.abs(my - view.dragging.my) > 3) view.dragging.moved = true;
+    if (view.dragging.node >= 0) {
+      // Move the module in the plane facing the viewer: undo the rotation on the screen delta.
+      const R = rot(), n = nodes[view.dragging.node], p = view.P[view.dragging.node];
+      const k = 1 / (view.zoom * p.scale);
+      const wx = dx * k, wy = dy * k;
+      n.x += R[0][0] * wx + R[1][0] * wy; n.y += R[0][1] * wx + R[1][1] * wy; n.z += R[0][2] * wx + R[1][2] * wy;
+    } else { view.yaw += dx * 0.006; view.pitch = Math.max(-1.4, Math.min(1.4, view.pitch + dy * 0.006)); }
+  });
+  const release = ev => {
+    if (!view.dragging) return;
+    const d = view.dragging; view.dragging = null; canvas.classList.remove('dragging');
+    if (!d.moved) selectModule(d.node >= 0 ? d.node : null);
+  };
+  canvas.addEventListener('pointerup', release); canvas.addEventListener('pointercancel', release);
+  canvas.addEventListener('wheel', ev => { ev.preventDefault(); view.zoom = Math.max(0.4, Math.min(3, view.zoom * (ev.deltaY < 0 ? 1.08 : 0.93))); }, { passive: false });
+  canvas.addEventListener('dblclick', () => { view.spin = view.spin ? 0 : (reduced ? 0 : 0.0025); });
+  frame();
+  return { stop() { alive = false; cancelAnimationFrame(raf); }, view };
+}
+
 function paintModules() {
+  if (modState.orbit) return;
   const { nodes, links, linkEls, nodeEls, maxW, sel } = modState;
   const touching = new Set();
   let localMax = 1;
@@ -1215,6 +1395,7 @@ function showTab(name) {
     document.getElementById(id).hidden = id !== name;
   if (name === 'modules' && !modState) modulesTab();
   if (name === 'modules' && modState && modState.svg && !modState.svg.isConnected) modulesTab();
+  if (name !== 'modules' && orbit) { orbit.stop(); orbit = null; modState = null; }
   if (name === 'symbols') symbolsTab();
   if (name === 'dead') deadTab();
   if (name === 'history') historyTab();

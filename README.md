@@ -207,9 +207,10 @@ it. It gives you the places and the pull requests to read first, with the exact 
    idxg open
    ```
 
-   The explorer has six tabs: an overview, a cross-module call graph where clicking a
-   module isolates its calls (with filters by layer, name and size, and a search box that
-   brings any module in with everything it calls or is called by), a symbol browser with callers and callees, dead-code
+   The explorer has six tabs: an overview, a cross-module call graph drawn in 3D that
+   rotates on its own (drag empty space to turn it, drag a module to move it, wheel to
+   zoom, click to isolate; a flat view is one click away) with filters by layer, name and
+   size and a search box that brings any module in with everything it calls or is called by, a symbol browser with callers and callees, dead-code
    candidates, the project's history (a weekly digest, every recent commit narrated, and
    the story period by period), and the repository's docs.
 
