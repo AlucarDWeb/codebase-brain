@@ -1249,12 +1249,28 @@ and how much of the repo the last build actually covered.
 If `idxg` is missing, install it from
 https://github.com/AlucarDWeb/codebase-brain and run `idxg init` here.
 
-## Use it before grepping
+## MCP first
 
-Prefer the `codebase-brain` MCP tools when the server is connected: `trace_path`,
-`search_graph`, `find_references`, `get_history`, `get_commit`, `get_digest`, `triage_crash`,
-`search_docs`, `get_doc`. They return the same answers as the commands below with a payload
-cap and no shell round trip. The commands are the fallback when the server is not available.
+The `codebase-brain` MCP server is registered in Claude Code and exposes this graph as tools.
+When it is connected, answer with the tools, not with `idxg` in a shell:
+
+| Question | MCP tool |
+|---|---|
+| who calls this, what does it call, override and conformance chains | `trace_path` |
+| find a symbol by words, regex, kind, module or file | `search_graph` |
+| every use of a symbol, with roles | `find_references` |
+| read a definition | `get_code_snippet` |
+| was this file compiled at all, before claiming "unused" | `check_index_coverage` |
+| who changed this and why, in which PR | `get_history` (with `narrate`), `get_commit` |
+| a crash report or stack trace | `triage_crash`, then `get_commit` on the PRs it names |
+| what shipped this week, how the project evolved | `get_digest`, `get_timeline` |
+| what the repo's own docs say | `search_docs`, `list_docs`, `get_doc` |
+| is the graph fresh, what does it cover | `index_status` |
+
+Every tool caps its payload and says when it truncated. The `idxg` commands below give the
+same answers and are the fallback when the server is not connected.
+
+## Use it before grepping
 
 ```bash
 idxg trace <Symbol> --direction in --first     # who calls it, with call sites
@@ -1337,9 +1353,16 @@ the compiler already writes. `idxg status` prints the database path and coverage
 wired, who calls what, where something is used, what a change would affect, which
 modules depend on which, who changed something and why, or what a crash report points
 at, query the graph first and fall back to ripgrep only for literal text or files the
-build never compiled. Use the `codebase-brain` MCP tools (`trace_path`, `search_graph`,
-`get_history`, `triage_crash`, `search_docs`, ...) when the server is connected; the
-`idxg` commands below are the equivalent when it is not.
+build never compiled.
+
+**Use the MCP server, not the shell.** The `codebase-brain` MCP server is registered in
+Claude Code. When it is connected, call its tools directly: `trace_path` for callers and
+callees, `search_graph` to find a symbol, `find_references` for every use,
+`get_code_snippet` to read a definition, `check_index_coverage` before any "unused" claim,
+`get_history` (with `narrate`) and `get_commit` for who changed what and why, `triage_crash`
+for a stack trace, `get_digest` and `get_timeline` for what shipped, `search_docs` and
+`get_doc` for the repo's own docs, `index_status` for freshness. The `idxg` commands below
+are the same functions for a shell, to be used only when the server is not connected.
 
 ```bash
 idxg trace <Symbol> --direction in --first    # callers, with call sites
