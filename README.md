@@ -24,6 +24,22 @@ generics or dynamic dispatch. Today it reads Swift, Objective-C, C and C++ throu
 store. The history and docs layers do not depend on the language, and another language
 would need only a second extractor writing the same tables.
 
+## Install
+
+```bash
+git clone https://github.com/AlucarDWeb/codebase-brain.git
+cd codebase-brain
+./install.sh
+```
+
+The script links `idxg`, `idxg-build` and `idxg-history` into `~/.local/bin`, links the
+Claude Code skill into `~/.claude/skills/`, and registers the MCP server when the `claude`
+CLI is present.
+
+You need macOS with Xcode installed (for `libIndexStore.dylib`) and Python 3.9 or newer.
+There are no third-party packages. Pull request descriptions need the GitHub CLI (`gh`),
+logged in; everything else works without it.
+
 ## How an agent uses it
 
 `./install.sh` registers the MCP server with Claude Code, and `idxg init` in a project
@@ -129,22 +145,6 @@ calls, and every claim in its answer points at a compiler edge or a commit.
 What this cannot do, and no static tool can: know why it crashed. The graph has no runtime
 data and no expression-level detail, so a force unwrap, a race or a nil is invisible to
 it. It gives you the places and the pull requests to read first, with the exact lines.
-
-## Install
-
-```bash
-git clone https://github.com/AlucarDWeb/codebase-brain.git
-cd codebase-brain
-./install.sh
-```
-
-The script links `idxg`, `idxg-build` and `idxg-history` into `~/.local/bin`, links the
-Claude Code skill into `~/.claude/skills/`, and registers the MCP server when the `claude`
-CLI is present.
-
-You need macOS with Xcode installed (for `libIndexStore.dylib`) and Python 3.9 or newer.
-There are no third-party packages. Pull request descriptions need the GitHub CLI (`gh`),
-logged in; everything else works without it.
 
 ## First run, step by step
 
