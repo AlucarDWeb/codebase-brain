@@ -93,6 +93,34 @@ def _path_layer(rel, depth=2):
     return parts[0] if len(parts) <= depth else "/".join(parts[:depth])
 
 
+TEST_MARKERS = ("tests", "test", "snapshottests", "snapshots", "testhelpers", "testing", "mocks", "spec")
+
+
+def _module_layers(db, modules):
+    """Layer per module: the path segment under the modules root of the directory its files
+    share (Feature, Service, Legacy, ...), or Tests when the name or prefix says so."""
+    import history
+    try:
+        g_path = db.execute("PRAGMA database_list").fetchone()[2]
+        prefixes = history.module_prefixes(g_path)
+    except Exception:
+        prefixes = {}
+    out = {}
+    for m in modules:
+        low = m.lower()
+        prefix = prefixes.get(m, "")
+        segs = prefix.split("/") if prefix else []
+        if any(low.endswith(t) or low.endswith("_" + t) for t in TEST_MARKERS) or any(sg.lower() in TEST_MARKERS for sg in segs):
+            out[m] = "Tests"
+        elif len(segs) >= 2:
+            out[m] = segs[1]
+        elif segs:
+            out[m] = segs[0]
+        else:
+            out[m] = "Other"
+    return out
+
+
 def slice_data(db, scope=None, limit=3000, edge_cap=60000, per_node_cap=45, detail_cap=12,
                dead_cap=600, file_cap=10):
     cur = db.cursor()
@@ -131,11 +159,10 @@ def slice_data(db, scope=None, limit=3000, edge_cap=60000, per_node_cap=45, deta
                                GROUP BY 1,2 HAVING COUNT(*) >= 3 ORDER BY 3 DESC LIMIT 1200""").fetchall()
     mod_edges = [list(r) for r in mod_edges]
 
-    # The panel only renders pairs among the top modules, so only those need detail.
-    size_by_mod = {m: n for m, n, *_ in modules}
-    shown = set(sorted({m for e in mod_edges for m in e[:2]},
-                       key=lambda m: -size_by_mod.get(m, 0))[:45])
-    wanted = {(a, b) for a, b, n in mod_edges if a in shown and b in shown and n >= 8}
+    # Every pair with 8+ call sites gets detail, so a module the filters bring in later
+    # has the same panel as a big one.
+    wanted = {(a, b) for a, b, n in mod_edges if n >= 8}
+    mod_layers = _module_layers(db, [m for m, *_ in modules])
     mod_edge_details = {}
     mod_edge_files = {}
     if wanted:
@@ -153,7 +180,7 @@ def slice_data(db, scope=None, limit=3000, edge_cap=60000, per_node_cap=45, deta
             if (am, bm) not in wanted:
                 continue
             bucket = mod_edge_details.setdefault(f"{am}>{bm}", [])
-            if len(bucket) >= detail_cap:
+            if len(bucket) >= min(detail_cap, 8):
                 continue
             bucket.append([caller, callee, relpath(ph) if ph else "", line or 0, n])
 
@@ -247,7 +274,7 @@ def slice_data(db, scope=None, limit=3000, edge_cap=60000, per_node_cap=45, deta
 
     return {"meta": meta, "counts": counts, "edge_kinds": ekinds, "sym_kinds": kinds,
             "dead": dead, "dead_total": total_dead,
-            "layers": layers, "modules": modules, "mod_edges": mod_edges,
+            "layers": layers, "modules": modules, "mod_edges": mod_edges, "mod_layers": mod_layers,
             "mod_edge_details": mod_edge_details,
             "mod_edge_files": mod_edge_files,
             "nodes": nodes, "edges": edges, "slice_size": len(ids), "scope": scope or "repo"}
@@ -341,16 +368,27 @@ function barCard(title, pairs) {
 
 /* ---------- module graph ---------- */
 let modState = null;
+const modOpts = { layer: '', q: '', top: 45, minCalls: 8, pin: '' };
 function modulesTab() {
   const s = document.getElementById('modules');
   s.innerHTML = '';
   const wrap = el('div', 'card');
   const head = el('div');
-  head.style.display = 'flex'; head.style.alignItems = 'baseline'; head.style.gap = '10px';
-  head.append(el('h2', null, 'cross-module call graph (top 45 modules, pairs with 8+ call sites)'));
+  head.style.display = 'flex'; head.style.alignItems = 'baseline'; head.style.gap = '10px'; head.style.flexWrap = 'wrap';
+  head.append(el('h2', null, 'cross-module call graph'));
   const hint = el('span', 'loc', 'click a module to isolate its calls, click empty space to reset');
   hint.style.marginLeft = 'auto'; head.append(hint);
   wrap.append(head);
+  const filters = el('div', 'filters');
+  const layers = [...new Set(Object.values(D.mod_layers || {}))].sort();
+  filters.innerHTML = `<input type="text" id="modiso" list="modnames" placeholder="isolate a module: type its name, press Enter">
+    <datalist id="modnames">${D.modules.map(([m]) => `<option value="${m}">`).join('')}</datalist>
+    <select id="modlayer"><option value="">all layers</option>${layers.map(l => `<option>${l}</option>`).join('')}</select>
+    <input type="text" id="modq" placeholder="narrow by name (substring or /regex/)">
+    <select id="modtop"><option value="45">45 biggest</option><option value="80">80 biggest</option><option value="150">150 biggest</option><option value="0">every module</option></select>
+    <select id="modmin"><option value="8">pairs with 8+ call sites</option><option value="3">pairs with 3+ call sites</option><option value="1">every pair</option></select>`;
+  wrap.append(filters);
+  const count = el('div', 'loc'); count.id = 'modcount'; count.style.marginBottom = '6px'; wrap.append(count);
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 1200 640'); svg.style.height = '640px';
   wrap.append(svg);
@@ -358,19 +396,86 @@ function modulesTab() {
   const info = el('div', 'card'); info.id = 'modinfo'; info.style.marginTop = '14px';
   info.append(el('div', 'empty', 'no module selected'));
   s.append(info);
+  document.getElementById('modlayer').value = modOpts.layer;
+  document.getElementById('modq').value = modOpts.q;
+  document.getElementById('modtop').value = String(modOpts.top);
+  document.getElementById('modmin').value = String(modOpts.minCalls);
+  const rebuild = () => {
+    modOpts.layer = document.getElementById('modlayer').value;
+    modOpts.q = document.getElementById('modq').value.trim();
+    modOpts.top = +document.getElementById('modtop').value;
+    modOpts.minCalls = +document.getElementById('modmin').value;
+    buildModuleGraph(svg);
+    selectModule(null);
+  };
+  for (const id of ['modlayer', 'modq', 'modtop', 'modmin']) document.getElementById(id).addEventListener('input', rebuild);
+  const iso = document.getElementById('modiso');
+  iso.value = modOpts.pin;
+  const isolate = () => {
+    const want = iso.value.trim();
+    const size = new Map(D.modules.map(([m, n]) => [m, n]));
+    let name = size.has(want) ? want : null;
+    if (!name && want) {
+      const low = want.toLowerCase();
+      const hits = D.modules.map(([m]) => m).filter(m => m.toLowerCase().includes(low))
+        .sort((a, b) => (size.get(b) || 0) - (size.get(a) || 0));
+      name = hits[0] || null;
+    }
+    modOpts.pin = name || '';
+    if (name) iso.value = name;
+    buildModuleGraph(svg);
+    if (name) selectModule(modState.idx.get(name)); else selectModule(null);
+  };
+  iso.addEventListener('change', isolate);
+  iso.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); isolate(); } });
+  buildModuleGraph(svg);
+  if (modOpts.pin && modState.idx.has(modOpts.pin)) selectModule(modState.idx.get(modOpts.pin));
+}
 
+function buildModuleGraph(svg) {
+  svg.innerHTML = '';
   const size = new Map(D.modules.map(([m, n]) => [m, n]));
-  const names = [...new Set(D.mod_edges.flatMap(([a, b]) => [a, b]))]
-    .sort((a, b) => (size.get(b) || 0) - (size.get(a) || 0)).slice(0, 45);
+  const layerOf = m => (D.mod_layers || {})[m] || 'Other';
+  let re = null, sub = '';
+  if (modOpts.q.startsWith('/') && modOpts.q.lastIndexOf('/') > 0) {
+    try { re = new RegExp(modOpts.q.slice(1, modOpts.q.lastIndexOf('/')), 'i'); } catch (e) { re = null; }
+  } else sub = modOpts.q.toLowerCase();
+  const keep = m => (!modOpts.layer || layerOf(m) === modOpts.layer) &&
+    (!re || re.test(m)) && (!sub || m.toLowerCase().includes(sub));
+  // Every module in the graph is a candidate, not only those with a cross-module call, so a
+  // filtered layer shows its whole membership; a module with no pair drawn still lists.
+  let names = D.modules.map(([m]) => m).filter(keep)
+    .sort((a, b) => (size.get(b) || 0) - (size.get(a) || 0));
+  const total = names.length;
+  if (modOpts.top) names = names.slice(0, modOpts.top);
+  // An isolated module is drawn with every partner it shares a pair with, whatever the
+  // filters and the size cap say, so nothing it calls or is called by is hidden.
+  if (modOpts.pin && size.has(modOpts.pin)) {
+    const partners = new Set([modOpts.pin]);
+    for (const [a, b, n] of D.mod_edges) {
+      if (n < modOpts.minCalls) continue;
+      if (a === modOpts.pin) partners.add(b);
+      if (b === modOpts.pin) partners.add(a);
+    }
+    const have = new Set(names);
+    for (const m of partners) if (!have.has(m)) names.push(m);
+  }
   const idx = new Map(names.map((n, i) => [n, i]));
-  const links = D.mod_edges.filter(([a, b, n]) => idx.has(a) && idx.has(b) && n >= 8)
+  const links = D.mod_edges.filter(([a, b, n]) => idx.has(a) && idx.has(b) && n >= modOpts.minCalls)
     .map(([a, b, n]) => ({ s: idx.get(a), t: idx.get(b), n }));
   const nodes = names.map((n, i) => ({ n, r: Math.min(22, 4 + Math.sqrt(size.get(n) || 1) / 5),
     x: 600 + 460 * Math.cos(2 * Math.PI * i / names.length),
     y: 320 + 260 * Math.sin(2 * Math.PI * i / names.length), vx: 0, vy: 0 }));
-  simulate(nodes, links, 1200, 640, 320, 420, 9000, 210);
+  // Layout cost is n squared per iteration, so the iteration count shrinks as the set grows.
+  const iters = Math.max(400, Math.min(9000, Math.round(2e7 / Math.max(1, names.length * names.length))));
+  simulate(nodes, links, 1200, 640, 320, iters, names.length > 100 ? 1600 : 9000, names.length > 100 ? 90 : 210);
+  document.getElementById('modcount').textContent =
+    (modOpts.pin ? `${modOpts.pin} with its partners; ` : '') +
+    `${names.length} of ${total} modules${modOpts.layer ? ` in ${modOpts.layer}` : ''}` +
+    `${modOpts.q ? ` matching "${modOpts.q}"` : ''}, ${links.length} pairs with ${modOpts.minCalls}+ call sites` +
+    ` (${D.modules.length} modules in the graph)`;
 
-  const maxW = Math.max(...links.map(l => l.n));
+  const maxW = Math.max(1, ...links.map(l => l.n));
   const NS = 'http://www.w3.org/2000/svg';
   const linkEls = links.map(l => {
     const ln = document.createElementNS(NS, 'line');
@@ -386,16 +491,16 @@ function modulesTab() {
     ci.setAttribute('cx', nd.x); ci.setAttribute('cy', nd.y); ci.setAttribute('r', nd.r);
     const tx = document.createElementNS(NS, 'text');
     tx.setAttribute('x', nd.x + nd.r + 3); tx.setAttribute('y', nd.y + 3);
-    tx.textContent = nd.n;
+    tx.textContent = names.length > 120 && nd.r < 6 ? '' : nd.n;
     const tt = document.createElementNS(NS, 'title');
-    tt.textContent = `${nd.n} - ${fmt(size.get(nd.n))} symbols`;
+    tt.textContent = `${nd.n} (${layerOf(nd.n)}) - ${fmt(size.get(nd.n))} symbols`;
     g.append(ci, tx, tt); g.style.cursor = 'pointer';
     g.onclick = ev => { ev.stopPropagation(); selectModule(i); };
     svg.append(g);
     return { g, ci, tx };
   });
   svg.onclick = () => selectModule(null);
-  modState = { svg, nodes, links, linkEls, nodeEls, size, idx, names, maxW, sel: null };
+  modState = { svg, nodes, links, linkEls, nodeEls, size, idx, names, maxW, sel: null, layerOf };
   paintModules();
 }
 
@@ -449,14 +554,14 @@ function selectModule(i) {
   const info = document.getElementById('modinfo');
   info.innerHTML = '';
   if (i === null) { info.append(el('div', 'empty', 'no module selected')); return; }
-  const { names, links, size } = modState;
+  const { names, links, size, layerOf } = modState;
   const name = names[i];
   const t = el('h2', null, name); t.style.color = 'var(--pink)'; t.style.fontSize = '13px';
   info.append(t);
   const outs = links.filter(l => l.s === i).sort((a, b) => b.n - a.n);
   const ins = links.filter(l => l.t === i).sort((a, b) => b.n - a.n);
   const kv = el('div', 'kv');
-  for (const [k, v] of [['symbols', fmt(size.get(name))],
+  for (const [k, v] of [['layer', layerOf(name)], ['symbols', fmt(size.get(name))],
                         ['calls out', `${fmt(outs.reduce((s, l) => s + l.n, 0))} sites to ${outs.length} modules`],
                         ['calls in', `${fmt(ins.reduce((s, l) => s + l.n, 0))} sites from ${ins.length} modules`]]) {
     kv.append(el('div', null, k), el('div', null, v));
@@ -488,6 +593,7 @@ function modTree(title, rows, pick, color, inbound) {
     const other = modState.names[pick(l)];
     const self = modState.names[modState.sel];
     const last = i === shown.length - 1;
+    if (other === undefined) return;
     const line = el('div');
     line.append(document.createTextNode(last ? '\u2514\u2500 ' : '\u251c\u2500 '));
     const a = el('a', null, other);
@@ -1108,6 +1214,7 @@ function showTab(name) {
   for (const id of ['overview', 'modules', 'symbols', 'dead', 'history', 'docs'])
     document.getElementById(id).hidden = id !== name;
   if (name === 'modules' && !modState) modulesTab();
+  if (name === 'modules' && modState && modState.svg && !modState.svg.isConnected) modulesTab();
   if (name === 'symbols') symbolsTab();
   if (name === 'dead') deadTab();
   if (name === 'history') historyTab();

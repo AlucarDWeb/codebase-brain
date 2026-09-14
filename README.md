@@ -208,7 +208,8 @@ it. It gives you the places and the pull requests to read first, with the exact 
    ```
 
    The explorer has six tabs: an overview, a cross-module call graph where clicking a
-   module isolates its calls, a symbol browser with callers and callees, dead-code
+   module isolates its calls (with filters by layer, name and size, and a search box that
+   brings any module in with everything it calls or is called by), a symbol browser with callers and callees, dead-code
    candidates, the project's history (a weekly digest, every recent commit narrated, and
    the story period by period), and the repository's docs.
 
