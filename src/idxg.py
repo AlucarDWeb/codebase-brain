@@ -1251,6 +1251,11 @@ https://github.com/AlucarDWeb/codebase-brain and run `idxg init` here.
 
 ## Use it before grepping
 
+Prefer the `codebase-brain` MCP tools when the server is connected: `trace_path`,
+`search_graph`, `find_references`, `get_history`, `get_commit`, `get_digest`, `triage_crash`,
+`search_docs`, `get_doc`. They return the same answers as the commands below with a payload
+cap and no shell round trip. The commands are the fallback when the server is not available.
+
 ```bash
 idxg trace <Symbol> --direction in --first     # who calls it, with call sites
 idxg trace <Symbol> --direction out --first    # what it calls
@@ -1329,9 +1334,12 @@ This repo can be queried as a compiler-accurate code graph, built from the index
 the compiler already writes. `idxg status` prints the database path and coverage.
 
 **Check it before exploring the code.** For any question about how this codebase is
-wired, who calls what, where something is used, what a change would affect, or which
-modules depend on which, query the graph first and fall back to ripgrep only for literal
-text or files the build never compiled.
+wired, who calls what, where something is used, what a change would affect, which
+modules depend on which, who changed something and why, or what a crash report points
+at, query the graph first and fall back to ripgrep only for literal text or files the
+build never compiled. Use the `codebase-brain` MCP tools (`trace_path`, `search_graph`,
+`get_history`, `triage_crash`, `search_docs`, ...) when the server is connected; the
+`idxg` commands below are the equivalent when it is not.
 
 ```bash
 idxg trace <Symbol> --direction in --first    # callers, with call sites

@@ -9,6 +9,14 @@ A code graph whose edges come from `libIndexStore`, so calls, references, overri
 conformances are the ones the compiler resolved, each with the exact `file:line` of the
 relation. Prefer it over grep for structure, and over a parser-derived graph always.
 
+## Use the MCP tools first
+
+When the `codebase-brain` MCP server is connected, answer with its tools (`search_graph`,
+`trace_path`, `get_history`, `triage_crash`, `search_docs` and the rest) rather than running
+`idxg` in a shell. The tools return the same text with a payload cap and no shell round trip,
+and they resolve the database from the working directory. Fall back to the `idxg` commands
+below only when the server is not connected or when a flag has no tool equivalent.
+
 ## Pick the right tool
 
 | Question | Use |
