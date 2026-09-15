@@ -1560,7 +1560,7 @@ function lifecycleCard() {
     answer.innerHTML = '';
     if (!q) return;
     const low = q.toLowerCase();
-    const hits = rows.filter(r => r[0].toLowerCase().includes(low) || (r[5] || '').toLowerCase() === low).slice(0, 8);
+    const hits = rows.filter(r => r[0].toLowerCase().includes(low) || (r[5] || '').toLowerCase() === low).sort((a, b) => b[3] - a[3]).slice(0, 8);
     if (!hits.length) { answer.append(el('div', 'empty', `no directory at module depth matches "${q}" (only directories with 3+ commits are tracked)`)); return; }
     for (const [comp, first, last, commits, isAlive, mod] of hits) {
       const row = el('div'); row.style.marginBottom = '4px';
