@@ -87,7 +87,10 @@ to call first. The MCP server resolves the database from the session's working d
 and takes `db` to target another project.
 
 Everything an agent gets, a person gets from the same functions on the CLI, and the
-explorer shows the same data as pages.
+explorer shows the same data as pages. The explorer also closes the loop the other way:
+when you select a module or a symbol, an "ask the agent" box offers four or five prompts
+filled in from what is on screen (its callers, its layer, its commits in the last 90 days)
+and naming the MCP tools to use, each with a copy button, ready to paste into Claude Code.
 
 ## Triage a crash
 

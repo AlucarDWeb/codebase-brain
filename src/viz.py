@@ -66,6 +66,14 @@ canvas.orbit.dragging{cursor:grabbing}
 .orbit-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin:8px 0 0}
 .orbit-legend span{display:inline-flex;align-items:center;gap:5px}
 .orbit-legend i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.ask{margin-top:14px;border:1px solid var(--line);border-left:3px solid var(--accent2);border-radius:6px;padding:10px 12px;background:var(--panel2)}
+.ask h2{margin-bottom:6px}
+.ask .p{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;padding:6px 0;border-top:1px dotted var(--line);font-size:12px;line-height:1.45}
+.ask .p:first-of-type{border-top:none}
+.ask .p .t{color:var(--fg);white-space:pre-wrap;word-break:break-word}
+.ask button{background:var(--panel);border:1px solid var(--line);color:var(--accent2);font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:4px;cursor:pointer;white-space:nowrap}
+.ask button:hover{border-color:var(--accent2)}
+.ask button.done{color:var(--accent);border-color:var(--accent)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
 .seg button{background:var(--panel2);border:none;color:var(--dim);font-family:var(--mono);font-size:11px;padding:5px 10px;cursor:pointer}
 .seg button.on{background:var(--accent);color:var(--bg)}
@@ -478,6 +486,30 @@ function barCard(title, pairs) {
   tb.append(body); c.append(tb); return c;
 }
 
+/* ---------- ask the agent ---------- */
+function copyText(text, btn) {
+  const done = () => { btn.textContent = 'copied'; btn.classList.add('done'); setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('done'); }, 1600); };
+  if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done)); }
+  else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.append(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) {} finally { ta.remove(); }
+}
+function askBox(prompts) {
+  const box = el('div', 'ask');
+  box.append(el('h2', null, 'ask the agent'));
+  box.append(el('div', 'loc', 'ready to paste into Claude Code in this repo; each names the MCP tools to use and is filled in from what is on this page'));
+  for (const text of prompts) {
+    const row = el('div', 'p');
+    const t = el('div', 't', text);
+    const b = el('button', null, 'copy'); b.onclick = () => copyText(text, b);
+    row.append(t, b); box.append(row);
+  }
+  return box;
+}
+
 /* ---------- module graph ---------- */
 let modState = null;
 const modOpts = { layer: '', q: '', top: 45, minCalls: 8, pin: '', view: 'orbit' };
@@ -870,6 +902,29 @@ function selectModule(i) {
   b.onclick = () => { showTab('symbols'); setModule(name); };
   jump.style.marginTop = '10px'; jump.append(b);
   info.append(jump);
+  info.append(askBox(modulePrompts(name, ins, outs)));
+}
+
+function modulePrompts(name, ins, outs) {
+  const H = D.history;
+  const size = modState.size.get(name) || 0;
+  const layer = modState.layerOf ? modState.layerOf(name) : '';
+  const callees = outs.slice(0, 4).map(l => modState.names[l.t]).filter(Boolean);
+  const callers = ins.slice(0, 4).map(l => modState.names[l.s]).filter(Boolean);
+  const churn = H && H.churn90 ? (H.churn90.find(r => r[0] === name) || [])[1] : null;
+  const out = [];
+  out.push(`Explain what the ${name} module is responsible for and how its work divides across the modules it calls` +
+    (callees.length ? ` (${callees.join(', ')}${outs.length > callees.length ? ` and ${outs.length - callees.length} more` : ''})` : '') +
+    `. Use search_docs and list_docs for its own documentation first, then trace_path on its most called symbols. Do not read source files before that.`);
+  if (churn) out.push(`${name} had ${churn} commits in the last 90 days` + (ins.length ? ` and ${ins.length} module${ins.length === 1 ? '' : 's'} call into it` : '') +
+    `. Using get_history with narrate for module ${name}, summarise what those changes were about, and say whether any of them changed something other modules call.`);
+  else out.push(`Using get_history with narrate for module ${name}, summarise what changed in it over the last six months and who drove the changes.`);
+  if (ins.length) out.push(`If I make a breaking change in ${name}, which modules are affected? Its callers on the graph are ${callers.join(', ')}` +
+    (ins.length > callers.length ? ` and ${ins.length - callers.length} more` : '') +
+    `. Use trace_path inbound two levels on its most called symbols (search_graph with module ${name}, sorted by calls in) and group the call sites by module.`);
+  out.push(`List the symbols in ${name} that nothing in the compiled build reaches (find_dead_code with module ${name}), run check_index_coverage on their files, and propose which ones are safe to delete and which are unproven because their callers were never compiled.`);
+  if (layer && layer !== 'Tests') out.push(`${name} is in the ${layer} layer with about ${fmt(size)} symbols. Compare it with the other ${layer} modules using get_architecture and get_churn: is it unusually large, unusually coupled, or unusually busy, and what would you split out first?`);
+  return out;
 }
 
 function modTree(title, rows, pick, color, inbound) {
@@ -1094,6 +1149,22 @@ function select(i) {
   d.append(tree('callers (inbound)', inn.get(i) || []));
   d.append(tree('callees (outbound)', out.get(i) || []));
   d.append(neighborhood(i));
+  d.append(askBox(symbolPrompts(n, inn.get(i) || [], out.get(i) || [])));
+}
+
+function symbolPrompts(n, callers, callees) {
+  const ref = n.m ? `${n.m}.${n.n}` : n.n;
+  const where = n.f ? `${n.f}:${n.l}` : 'an external definition';
+  const callerMods = [...new Set(callers.map(([o]) => D.nodes[o].m).filter(Boolean))];
+  const out = [];
+  out.push(`Explain what ${ref} (${n.k}, defined at ${where}) does and why it exists. Start with get_code_snippet for the definition, then get_history with narrate and symbol ${n.n} for the pull requests that introduced and changed it. Do not read other files before that.`);
+  out.push(`I want to change the signature or behaviour of ${ref}. It has ${fmt(n.ci)} recorded calls from ${callerMods.length || 'an unknown number of'} module${callerMods.length === 1 ? '' : 's'}` +
+    (callerMods.length ? ` (${callerMods.slice(0, 5).join(', ')})` : '') +
+    `. Use trace_path inbound with depth 2 and edge kinds CALLS,REFERENCES,OVERRIDES, list every call site by module, and say which ones are tests.`);
+  if (n.k === 'Protocol' || n.k === 'Class') out.push(`Which types conform to or inherit from ${ref}, and which of them override its requirements? Use trace_path with edge kinds INHERITS,OVERRIDES in both directions and summarise the hierarchy.`);
+  out.push(`Is ${ref} still needed? Check find_references for uses beyond its definition, check_index_coverage on ${n.f || 'its file'} to know whether the callers' files were compiled, and give a yes, no, or unproven answer with the evidence.`);
+  if (callees.length) out.push(`Walk what ${ref} calls (trace_path outbound, depth 2, CALLS only) and describe the flow in plain language: what it reads, what it changes, what it triggers, and where an error would surface.`);
+  return out;
 }
 function tree(title, rows) {
   const c = el('div');
