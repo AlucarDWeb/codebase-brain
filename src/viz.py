@@ -1535,22 +1535,87 @@ function historyTab() {
   rc.append(rows); g.append(rc);
   s.append(g);
 
-  const comps = el('div', 'card');
-  const alive = H.components.filter(c => c[4]), gone = H.components.filter(c => !c[4]);
-  comps.append(el('h2', null, `directories at module depth: ${alive.length} present, ${gone.length} gone (3+ commits each)`));
-  const ct = el('table');
-  ct.innerHTML = '<thead><tr><th>directory</th><th>first</th><th>last</th><th class="num">commits</th><th>state</th><th>module</th></tr></thead>';
-  const cb = el('tbody');
-  for (const [comp, first, last, commits, isAlive, mod] of H.components.slice(0, 120)) {
-    const tr = el('tr');
-    tr.append(el('td', null, comp), el('td', 'loc', first), el('td', 'loc', last), numTd(commits),
-              el('td', isAlive ? 'loc' : 'subj', isAlive ? 'present' : 'gone'), el('td', 'loc', mod || ''));
-    if (!isAlive) tr.style.color = 'var(--warn)';
-    cb.append(tr);
+  s.append(lifecycleCard());
+}
+
+/* ---------- module lifecycle: directories at module depth, born and gone ---------- */
+function lifecycleCard() {
+  const H = D.history;
+  const card = el('div', 'card');
+  const rows = H.components || [];
+  const alive = rows.filter(c => c[4]).length, gone = rows.length - alive;
+  card.append(el('h2', null, `module lifecycle: ${fmt(alive)} directories at module depth present, ${fmt(gone)} gone`));
+  card.append(el('div', 'loc', 'a directory at module depth is a module or a module-sized tree; first and last commit tell when it appeared and, if it is gone, when it was removed or moved. Three or more commits each. Test and snapshot trees are searchable but left off the timeline.'));
+  const isFixture = c => /(^|\\/)(tests?|snapshots?|snapshottests|__snapshots__|references|fixtures|mocks)(\\/|$)/i.test(c);
+  const byComp = new Map(rows.map(r => [r[0], r]));
+
+  // search: what happened to X
+  const filters = el('div', 'filters'); filters.style.marginTop = '10px';
+  filters.innerHTML = `<input type="text" id="lifeq" list="lifenames" placeholder="what happened to ...  (type a directory or module name)">
+    <datalist id="lifenames">${rows.map(r => `<option value="${r[0]}">`).join('')}</datalist>`;
+  card.append(filters);
+  const answer = el('div'); answer.style.margin = '4px 0 12px'; answer.style.fontSize = '12px';
+  card.append(answer);
+  const describe = q => {
+    answer.innerHTML = '';
+    if (!q) return;
+    const low = q.toLowerCase();
+    const hits = rows.filter(r => r[0].toLowerCase().includes(low) || (r[5] || '').toLowerCase() === low).slice(0, 8);
+    if (!hits.length) { answer.append(el('div', 'empty', `no directory at module depth matches "${q}" (only directories with 3+ commits are tracked)`)); return; }
+    for (const [comp, first, last, commits, isAlive, mod] of hits) {
+      const row = el('div'); row.style.marginBottom = '4px';
+      const name = el('span', 'nm', comp); name.style.color = isAlive ? 'var(--accent)' : 'var(--warn)';
+      row.append(name, document.createTextNode(isAlive
+        ? `  present, first commit ${first}, last ${last}, ${fmt(commits)} commits`
+        : `  gone since ${last}: first commit ${first}, ${fmt(commits)} commits before it was removed or moved`));
+      if (mod) {
+        row.append(document.createTextNode(`  (module ${mod}`));
+        if (isAlive) { const a = el('a', null, ', see in the module graph'); a.style.color = 'var(--accent2)'; a.style.cursor = 'pointer'; a.onclick = () => { showTab('modules'); setTimeout(() => goToModule(mod, true), 50); }; row.append(a); }
+        row.append(document.createTextNode(')'));
+      }
+      answer.append(row);
+    }
+  };
+  filters.querySelector('#lifeq').addEventListener('input', ev => describe(ev.target.value.trim()));
+
+  // timeline by year
+  const years = new Map();
+  for (const r of rows) {
+    if (isFixture(r[0])) continue;
+    const yb = r[1].slice(0, 4); if (!years.has(yb)) years.set(yb, { born: [], gone: [] });
+    years.get(yb).born.push(r);
+    if (!r[4]) { const yg = r[2].slice(0, 4); if (!years.has(yg)) years.set(yg, { born: [], gone: [] }); years.get(yg).gone.push(r); }
   }
-  ct.append(cb); comps.append(ct);
-  if (H.components.length > 120) comps.append(el('div', 'loc', `... ${H.components.length - 120} more; idxg sql against the history db lists them all`));
-  s.append(comps);
+  const t = el('table');
+  t.innerHTML = '<thead><tr><th>year</th><th>appeared</th><th>removed or moved away</th></tr></thead>';
+  const tb = el('tbody');
+  const chips = (list, color) => {
+    const box = el('div'); box.style.display = 'flex'; box.style.flexWrap = 'wrap'; box.style.gap = '4px';
+    const sorted = [...list].sort((a, b) => b[3] - a[3]);
+    const render = (n) => {
+      box.innerHTML = '';
+      for (const r of sorted.slice(0, n)) {
+        const c = el('span', 'badge', r[0].split('/').pop()); c.title = `${r[0]}: ${fmt(r[3])} commits, ${r[1]} to ${r[2]}`; c.style.color = color; c.style.cursor = 'pointer';
+        c.onclick = () => { const q = filters.querySelector('#lifeq'); q.value = r[0]; describe(r[0]); q.scrollIntoView({ block: 'center' }); };
+        box.append(c);
+      }
+      if (sorted.length > n) { const more = el('a', null, `+${sorted.length - n} more`); more.style.color = 'var(--dim)'; more.style.cursor = 'pointer'; more.style.fontSize = '11px'; more.onclick = () => render(sorted.length); box.append(more); }
+    };
+    render(10);
+    return box;
+  };
+  for (const y of [...years.keys()].sort().reverse()) {
+    const { born, gone: g } = years.get(y);
+    const tr = el('tr');
+    const yb = el('td'); yb.textContent = y; yb.style.verticalAlign = 'top'; yb.style.color = 'var(--dim)';
+    const tdB = el('td'); tdB.style.verticalAlign = 'top'; tdB.style.whiteSpace = 'normal'; tdB.style.minWidth = '300px';
+    tdB.append(el('div', 'loc', `${born.length} appeared`)); if (born.length) tdB.append(chips(born, 'var(--accent)'));
+    const tdG = el('td'); tdG.style.verticalAlign = 'top'; tdG.style.whiteSpace = 'normal'; tdG.style.minWidth = '300px';
+    tdG.append(el('div', 'loc', `${g.length} removed`)); if (g.length) tdG.append(chips(g, 'var(--warn)'));
+    tr.append(yb, tdB, tdG); tb.append(tr);
+  }
+  t.append(tb); card.append(t);
+  return card;
 }
 
 function weeklyCard() {

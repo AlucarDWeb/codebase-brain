@@ -1453,7 +1453,7 @@ def slice_for_viz(hdb_path, recent=60, churn_limit=40, weeks_limit=26, releases_
             "template": digest_template(),
             "components": [list(r) for r in db.execute(
                 """SELECT component, first_date, last_date, commits, alive, module FROM components
-                   WHERE commits >= 3 ORDER BY first_date DESC LIMIT 400""")],
+                   WHERE commits >= 3 ORDER BY first_date DESC LIMIT 3000""")],
             "docs": [list(r) for r in db.execute(
                 """SELECT path, title, kind, module, published, bytes FROM docs ORDER BY kind, path LIMIT 1500""")],
         }
