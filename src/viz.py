@@ -1589,13 +1589,25 @@ function lifecycleCard() {
   const t = el('table');
   t.innerHTML = '<thead><tr><th>year</th><th>appeared</th><th>removed or moved away</th></tr></thead>';
   const tb = el('tbody');
+  // A chip names the most specific segment; a generic tail (Sources, UI, Domain) is kept
+  // as a suffix so "Discovery/Source/UI" reads "Discovery · UI", not "UI".
+  const GENERIC = new Set(['sources', 'source', 'src', 'ui', 'domain', 'data', 'tests', 'test', 'generated', 'modules', 'module',
+    'feature', 'features', 'service', 'services', 'shared', 'foundation', 'legacy', 'internal', 'public', 'integration',
+    'resources', 'mappers', 'reducers', 'usecases', 'presenters', 'views', 'models', 'classes', 'helpers', 'extensions', 'core']);
+  const chipLabel = path => {
+    const parts = path.split('/');
+    const specific = parts.filter(x => !GENERIC.has(x.toLowerCase()));
+    const head = specific.length ? specific[specific.length - 1] : parts[parts.length - 1];
+    const last = parts[parts.length - 1];
+    return head === last ? head : `${head} \u00b7 ${last}`;
+  };
   const chips = (list, color) => {
     const box = el('div'); box.style.display = 'flex'; box.style.flexWrap = 'wrap'; box.style.gap = '4px';
     const sorted = [...list].sort((a, b) => b[3] - a[3]);
     const render = (n) => {
       box.innerHTML = '';
       for (const r of sorted.slice(0, n)) {
-        const c = el('span', 'badge', r[0].split('/').pop()); c.title = `${r[0]}: ${fmt(r[3])} commits, ${r[1]} to ${r[2]}`; c.style.color = color; c.style.cursor = 'pointer';
+        const c = el('span', 'badge', chipLabel(r[0])); c.title = `${r[0]}: ${fmt(r[3])} commits, ${r[1]} to ${r[2]}`; c.style.color = color; c.style.cursor = 'pointer';
         c.onclick = () => { const q = filters.querySelector('#lifeq'); q.value = r[0]; describe(r[0]); q.scrollIntoView({ block: 'center' }); };
         box.append(c);
       }
