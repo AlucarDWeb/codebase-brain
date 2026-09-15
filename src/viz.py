@@ -66,6 +66,7 @@ canvas.orbit.dragging{cursor:grabbing}
 .orbit-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin:8px 0 0}
 .orbit-legend span{display:inline-flex;align-items:center;gap:5px}
 .orbit-legend i{width:10px;height:10px;border-radius:50%;display:inline-block}
+@media(max-width:1000px){#modinfo > div[style*="grid-template-columns"]{grid-template-columns:1fr!important}}
 .ask{margin-top:14px;border:1px solid var(--line);border-left:3px solid var(--accent2);border-radius:6px;padding:10px 12px;background:var(--panel2)}
 .ask h2{margin-bottom:6px}
 .ask .p{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;padding:6px 0;border-top:1px dotted var(--line);font-size:12px;line-height:1.45}
@@ -889,20 +890,27 @@ function selectModule(i) {
     kv.append(el('div', null, k), el('div', null, v));
   }
   info.append(kv);
-  // Stacked, not side by side: call-site paths are wide and a two-column grid clipped them.
+  // Callers and callees stacked on the left (call-site paths are wide), the prompts on the
+  // right where the panel was empty.
+  const cols = el('div');
+  cols.style.display = 'grid'; cols.style.gridTemplateColumns = 'minmax(0, 1.4fr) minmax(300px, 1fr)';
+  cols.style.gap = '18px'; cols.style.alignItems = 'start';
   const g = el('div');
   g.style.display = 'grid';
   g.style.gap = '16px';
+  g.style.minWidth = '0';
   g.append(modTree(`callers (inbound)`, ins, l => l.s, 'var(--accent)', true));
   g.append(modTree(`callees (outbound)`, outs, l => l.t, 'var(--warn)', false));
-  info.append(g);
   const jump = el('div');
   const b = el('a', null, `browse ${name} symbols`);
   b.style.color = 'var(--accent2)'; b.style.cursor = 'pointer';
   b.onclick = () => { showTab('symbols'); setModule(name); };
   jump.style.marginTop = '10px'; jump.append(b);
-  info.append(jump);
-  info.append(askBox(modulePrompts(name, ins, outs)));
+  g.append(jump);
+  const ask = askBox(modulePrompts(name, ins, outs));
+  ask.style.marginTop = '0'; ask.style.position = 'sticky'; ask.style.top = '12px';
+  cols.append(g, ask);
+  info.append(cols);
 }
 
 function modulePrompts(name, ins, outs) {
