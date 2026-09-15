@@ -1537,6 +1537,80 @@ function historyTab() {
 
 }
 
+function weeklyCard() {
+  const card = el('div', 'card');
+  const head = el('div');
+  head.style.display = 'flex'; head.style.alignItems = 'baseline'; head.style.gap = '12px'; head.style.flexWrap = 'wrap';
+  head.append(el('h2', null, 'week by week'));
+  const wk = (H.weeks || []);
+  if (!wk.length) { card.append(head, el('div', 'empty', 'no weeks to show')); return card; }
+  const sel = el('select'); sel.style.width = 'auto'; sel.id = 'digestsel';
+  const gw = document.createElement('optgroup'); gw.label = 'weeks';
+  for (const w of [...wk].reverse()) {
+    const o = el('option', null, `${w.week}  ${w.digest.window.start} to ${w.digest.window.end}  (${w.commits} changes)`);
+    o.value = 'w:' + w.week; gw.append(o);
+  }
+  sel.append(gw);
+  const rds = H.release_digests || [];
+  if (rds.length) {
+    const gr = document.createElement('optgroup'); gr.label = 'releases: what first shipped in each';
+    for (const d of rds) {
+      const o = el('option', null, `${d.window.release}  ${d.window.start} to ${d.window.end}  (${d.window.commits} changes)`);
+      o.value = 'r:' + d.window.release; gr.append(o);
+    }
+    sel.append(gr);
+  }
+  const hint = el('span', 'loc', `${wk.length} most recent weeks and ${(H.release_digests || []).length} releases, every change narrated; the same layout idxg history digest --html writes`);
+  head.append(sel, hint);
+  card.append(head);
+  const frame = document.createElement('iframe');
+  frame.style.width = '100%'; frame.style.border = '1px solid var(--line)'; frame.style.borderRadius = '6px';
+  frame.style.height = '900px'; frame.style.background = 'transparent';
+  card.append(frame);
+  const byWeek = new Map(wk.map(w => ['w:' + w.week, w.digest]));
+  for (const d of rds) byWeek.set('r:' + d.window.release, d);
+  const show = () => {
+    const digest = byWeek.get(sel.value);
+    if (!digest) return;
+    const w = { digest };
+    const theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+    const view = Object.assign({}, w.digest); delete view.window;
+    const page = H.template.replace('{{TITLE}}', `${w.digest.eyebrow[0]} digest, ${w.digest.window.label}`)
+      .replace('{{DIGEST_JSON}}', JSON.stringify(view).replace(/<\\//g, '<\\\\/'));
+    frame.srcdoc = `<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8"></head><body>${page}</body></html>`;
+  };
+  frame.onload = () => {
+    try {
+      const doc = frame.contentDocument;
+      frame.style.height = Math.min(6000, doc.documentElement.scrollHeight + 20) + 'px';
+      doc.body.addEventListener('click', () => setTimeout(() => {
+        frame.style.height = Math.min(6000, doc.documentElement.scrollHeight + 20) + 'px'; }, 30));
+    } catch (e) {}
+  };
+  sel.addEventListener('input', show);
+  document.getElementById('themeToggle').addEventListener('click', () => setTimeout(show, 0));
+  show();
+  return card;
+}
+
+function narratedCard() {
+  const card = el('div', 'card');
+  card.append(el('h2', null, `commit by commit, most recent ${(H.recent_narrated || []).length}`));
+  card.append(el('div', 'loc', 'each paragraph is computed from the commit, its pull request description and its files; older commits: idxg history log --narrate'));
+  const box = el('div', 'rows'); box.style.maxHeight = '60vh';
+  for (const c of (H.recent_narrated || [])) {
+    const row = el('div', 'row'); row.style.cursor = 'default'; row.style.display = 'block';
+    const top = el('div');
+    top.append(el('span', 'sha', `${c.day}  ${c.short}  `));
+    if (c.url) { const a = el('a', 'ext', `#${c.pr}`); a.href = c.url; a.target = '_blank'; top.append(a); }
+    const p = el('div', 'prose'); p.style.fontSize = '13px'; p.style.maxWidth = 'none';
+    p.textContent = c.text;
+    row.append(top, p); box.append(row);
+  }
+  card.append(box);
+  return card;
+}
+
 function activityChart() {
   const months = H.monthly;
   const W = 1200, Hh = 160, pad = 28;
