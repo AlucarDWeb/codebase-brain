@@ -63,7 +63,8 @@ The tools, by the question they answer:
 | Any SQL over the graph | `query_graph` | `idxg sql` |
 | Was this file compiled at all (before claiming "unused") | `check_index_coverage` | `idxg coverage` |
 | Layers, modules, cross-module hotspots | `get_architecture` | `idxg arch` |
-| Candidates nothing reaches | `find_dead_code` | `idxg dead` |
+| Candidates nothing reaches, or code only tests keep alive | `find_dead_code` (`test_only`) | `idxg dead`, `idxg dead --test-only` |
+| Which release first shipped a change | `get_releases`, `get_history` with `release` | `idxg history releases`, `idxg history log --release` |
 | Who changed this, when, in which PR, and why | `get_history` (`narrate`) | `idxg history log --narrate` |
 | One commit or PR in full: description, files, modules | `get_commit` | `idxg history show` |
 | Where change concentrates | `get_churn` | `idxg history churn` |
@@ -265,6 +266,7 @@ idxg refs MyType                          # every occurrence, with roles
 idxg snippet MyType                       # definition, read from disk
 idxg arch                                 # layers, modules, hotspots, build targets
 idxg dead --verify                        # symbols nothing in the indexed build reaches
+idxg dead --test-only                     # production symbols only test code reaches
 idxg coverage Sources/Feature             # what the compiled index actually covers
 idxg sql "SELECT kind, COUNT(*) n FROM symbols WHERE in_repo=1 GROUP BY kind"
 idxg viz --scope MyModule --open          # HTML explorer
@@ -282,6 +284,8 @@ idxg history log --narrate --since 2026-09-01   # one plain paragraph per commit
 idxg history show '#1234'                 # one commit or PR in full: description, files, modules
 idxg history digest                       # this week: every change narrated, grouped by area
 idxg history digest --week 2026-W36 --html --open   # the same as a standalone page
+idxg history releases                     # version tags: when each branched, what first shipped in it
+idxg history log --release 1.329.0        # every change that first shipped in one release
 idxg history churn --by module            # where change concentrated in the last year
 idxg history timeline --periods 4         # the story, one paragraph per period
 idxg history vault --out ~/my-vault       # history and docs as knowledge-vault clippings
@@ -315,6 +319,15 @@ are incremental: after the first one, only new commits are read.
 Every changed file is attributed to a module by the directory prefix the graph knows for
 that module, and to a component directory at module depth. `log`, `show`, `churn` and
 `timeline` are built on that attribution.
+
+### Releases
+
+Version tags (`1.329.0`, `v2.3`; another shape via `idxg config history_release_tags=<regex>`)
+are mapped to the point where their branch left the history branch. A commit belongs to the
+first release whose branch point is at or after it, so every commit in `log`, `show`,
+`get_history` and the explorer carries its release, `idxg history releases` lists the
+releases with what first shipped in each, and `--release <tag>` filters to one. A commit
+merged after the latest branch point shows as not in any tagged release yet.
 
 ### Pull request descriptions
 

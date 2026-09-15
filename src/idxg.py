@@ -643,6 +643,23 @@ def cmd_viz(a):
 
 def cmd_dead(a):
     db = connect(a.db)
+    if getattr(a, "test_only", False):
+        kinds = tuple(a.kind.split(",")) if a.kind else None
+        rows = deadcode.test_only(db, kinds=kinds, module=a.module, limit=a.limit, offset=a.offset)
+        if a.json:
+            print(json.dumps([dict(r) for r in rows], indent=1))
+            return
+        print(f"{len(rows)} production symbols that only test code reaches"
+              + (f" in {a.module}" if a.module else "") + (f" (offset {a.offset})" if a.offset else ""))
+        print("no production caller in the compiled build; a caller in an uncompiled file is invisible, so verify before deleting")
+        mod = None
+        for r in rows:
+            if r["module"] != mod:
+                mod = r["module"]
+                print(f"\n{mod}")
+            print(f"  {r['name']:<50} {r['kind']:<16} {(r['rel'] or '').split('/')[-1]}:{r['def_line']}"
+                  f"  used by {r['test_modules']} test module{'s' if r['test_modules'] != 1 else ''}")
+        return
     m = meta(db)
     root = m.get("repo_root", "")
     total, rows = deadcode.candidates(db, kinds=a.kind.split(",") if a.kind else None,
@@ -749,7 +766,8 @@ def cmd_history_build(a):
     first_parent = cfg.get("history_first_parent", True) and not getattr(a, "all_commits", False)
     path, counts = hist.build(root, graph, branch=a.branch or (cfg.get("history_branch") or None),
                               first_parent=first_parent, full=a.full, since=a.since,
-                              docs=a.docs, prs=a.prs and cfg.get("history_prs", True), manifest_path=manifest)
+                              docs=a.docs, prs=a.prs and cfg.get("history_prs", True), manifest_path=manifest,
+                              release_tags=cfg.get("history_release_tags") or None)
     if getattr(a, "json", False):
         print(json.dumps({"db": path, **counts}))
 
@@ -757,8 +775,9 @@ def cmd_history_build(a):
 def _fmt_commit(r, web=""):
     pr = f"  #{r['pr']}" if r["pr"] else ""
     tickets = f"  [{r['tickets']}]" if r["tickets"] else ""
+    rel = f"  release {r['release']}" if "release" in r.keys() and r["release"] else ""
     return (f"{r['day']}  {r['short']}  {r['subject'][:100]}{pr}{tickets}\n"
-            f"            {r['author']}  {r['files']} files  +{r['ins']:,} -{r['del']:,}")
+            f"            {r['author']}  {r['files']} files  +{r['ins']:,} -{r['del']:,}{rel}")
 
 
 def _symbol_paths(a):
@@ -785,7 +804,8 @@ def cmd_history_log(a):
         note = (f"following {sym['name']} through its definition file {path}; line-level history "
                 f"is not tracked, so unrelated edits to the file appear too\n")
     rows = hist.commits_for(hdb, paths=paths or None, module=a.module, component=a.component,
-                            author=a.author, since=a.since, until=a.until, query=a.grep, limit=a.limit)
+                            author=a.author, since=a.since, until=a.until, query=a.grep,
+                            release=getattr(a, "release", None), limit=a.limit)
     m = hist.meta(hdb)
     if getattr(a, "json", False):
         out = [dict(r) for r in rows]
@@ -798,8 +818,9 @@ def cmd_history_log(a):
                 o["narrative"] = hist.narrate_commit(full, hist.files_of(hdb, o["sha"]), m.get("remote_web", ""))
         print(json.dumps({"branch": m.get("branch"), "head": m.get("head_sha"), "commits": out}, indent=1))
         return
+    scope = [x for x in paths + [a.module, a.component, (f"release {a.release}" if getattr(a, "release", None) else None)] if x]
     print(f"{m.get('branch')} @ {m.get('head_sha', '')[:11]}, built {m.get('built_at')}"
-          + (f"  (scope: {', '.join(filter(None, paths + [a.module, a.component]))})" if paths or a.module or a.component else ""))
+          + (f"  (scope: {', '.join(scope)})" if scope else ""))
     if note:
         print(note.rstrip())
     if not rows:
@@ -857,6 +878,12 @@ def cmd_history_show(a):
         print(f"pr: #{r['pr']}" + (f"  {web}/pull/{r['pr']}" if web else ""))
     if r["tickets"]:
         print(f"tickets: {r['tickets']}")
+    if "release" in r.keys():
+        if r["release"]:
+            rel = hdb.execute("SELECT tag_date, base_day FROM releases WHERE tag = ?", (r["release"],)).fetchone()
+            print(f"release: first shipped in {r['release']}" + (f" (branched from {hist.meta(hdb).get('branch')} on {rel['base_day']}, tagged {rel['tag_date']})" if rel else ""))
+        else:
+            print("release: not in any tagged release yet")
     print(f"{r['files']} files, +{r['ins']:,} -{r['del']:,}, {r['parents']} parent(s)")
     print("\n" + textwrap.fill(hist.narrate_commit(r, hist.files_of(hdb, r["sha"], 2000), web), 100))
     if r["pr_body"]:
@@ -1083,6 +1110,23 @@ def cmd_crash(a):
               + (f"  {web}/pull/{c['pr']}" if web and c["pr"] else ""))
     print("this is what changed near the crash, not why it crashed; read the callers and the PR bodies "
           "(idxg history show) before deciding.")
+
+
+def cmd_history_releases(a):
+    hist, hdb = history_db(a)
+    rows = hist.releases(hdb, limit=a.limit)
+    if getattr(a, "json", False):
+        print(json.dumps([dict(r) for r in rows], indent=1))
+        return
+    m = hist.meta(hdb)
+    if not rows:
+        print("no version tags found; set idxg config history_release_tags=<regex> if yours look different")
+        return
+    print(f"releases by the point where their branch left {m.get('branch')}; commits counts what first shipped in each")
+    print(f"  {'tag':<14} {'branched':<11} {'tagged':<11} {'commits':>8}")
+    for r in rows:
+        print(f"  {r['tag']:<14} {r['base_day'] or '':<11} {r['tag_date'] or '':<11} {r['commits']:>8,}")
+    print("  idxg history log --release <tag> lists what first shipped in one")
 
 
 def cmd_history_vault(a):
@@ -1768,6 +1812,8 @@ def build_parser():
                         "dynamically, so ObjC candidates are mostly false positives")
     p.add_argument("--verify", action="store_true",
                    help="drop candidates whose name appears in any other file (ripgrep)")
+    p.add_argument("--test-only", dest="test_only", action="store_true",
+                   help="instead: production symbols reached only from test modules")
     p.add_argument("--limit", type=int, default=200)
     p.add_argument("--offset", type=int, default=0)
     p.add_argument("--json", action="store_true")
@@ -1795,6 +1841,7 @@ def build_parser():
     h.add_argument("--module"); h.add_argument("--component", help="module-depth directory")
     h.add_argument("--author"); h.add_argument("--since"); h.add_argument("--until")
     h.add_argument("--grep", help="substring of subject, body or ticket")
+    h.add_argument("--release", help="only commits that first shipped in this release tag")
     h.add_argument("--files", action="store_true", help="list changed files per commit")
     h.add_argument("--narrate", action="store_true",
                    help="one plain paragraph per commit: who, what, why (from the PR), which files")
@@ -1808,6 +1855,10 @@ def build_parser():
     h.add_argument("--max-body", type=int, default=4000, help="cap the printed PR description")
     h.add_argument("--json", action="store_true")
     h.set_defaults(hfn=cmd_history_show)
+    h = hs.add_parser("releases", help="version tags, when each branched off, what first shipped in each")
+    h.add_argument("--limit", type=int, default=30)
+    h.add_argument("--json", action="store_true")
+    h.set_defaults(hfn=cmd_history_releases)
     h = hs.add_parser("digest", help="weekly digest: every change narrated, grouped by area")
     h.add_argument("--week", help="ISO week, e.g. 2026-W36 (default: the week of the last commit)")
     h.add_argument("--since"); h.add_argument("--until")

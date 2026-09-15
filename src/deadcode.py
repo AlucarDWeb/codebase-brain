@@ -96,3 +96,37 @@ def mentions(root, name, own_file):
         elif path not in others:
             others.append(path)
     return others, max(0, same - 1)
+
+
+TEST_MODULE_GLOBS = ("*test*", "*spec*", "*snapshot*", "*mock*", "*fixture*")
+
+
+def test_only(db, kinds=None, module=None, limit=200, offset=0):
+    """Production symbols that something reaches, but only from test code: every inbound
+    semantic edge comes from a symbol in a test module. A candidate list like `candidates`,
+    bounded by the same coverage caveat: an uncompiled production caller is invisible."""
+    kinds = kinds or DEAD_KINDS
+    test_clause = " OR ".join("LOWER(c.module) GLOB ?" for _ in TEST_MODULE_GLOBS)
+    own_test = " OR ".join("LOWER(s.module) GLOB ?" for _ in TEST_MODULE_GLOBS)
+    where = [f"s.in_repo = 1", f"s.kind IN ({','.join('?' * len(kinds))})", f"NOT ({own_test})", "s.module IS NOT NULL"]
+    args = list(kinds) + list(TEST_MODULE_GLOBS)
+    if module:
+        where.append("s.module = ?")
+        args.append(module)
+    sql = f"""
+      WITH cand AS (
+        SELECT s.usr_hash, s.name, s.kind, s.module, s.def_path_hash, s.def_line, s.call_in, s.in_deg
+        FROM symbols s WHERE {' AND '.join(where)}
+      )
+      SELECT cand.name, cand.kind, cand.module, f.rel, cand.def_line, cand.call_in,
+             (SELECT COUNT(DISTINCT c.module) FROM edges e JOIN symbols c ON c.usr_hash = e.src
+              WHERE e.dst = cand.usr_hash AND e.kind IN ({DEAD_INBOUND})) AS test_modules
+      FROM cand LEFT JOIN files f ON f.path_hash = cand.def_path_hash
+      WHERE EXISTS (SELECT 1 FROM edges e JOIN symbols c ON c.usr_hash = e.src
+                    WHERE e.dst = cand.usr_hash AND e.kind IN ({DEAD_INBOUND}) AND ({test_clause}))
+        AND NOT EXISTS (SELECT 1 FROM edges e JOIN symbols c ON c.usr_hash = e.src
+                        WHERE e.dst = cand.usr_hash AND e.kind IN ({DEAD_INBOUND})
+                          AND c.usr_hash <> cand.usr_hash AND NOT ({test_clause}))
+      ORDER BY cand.module, cand.name LIMIT ? OFFSET ?"""
+    rows = db.execute(sql, args + list(TEST_MODULE_GLOBS) + list(TEST_MODULE_GLOBS) + [limit, offset]).fetchall()
+    return rows

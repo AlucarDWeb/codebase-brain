@@ -36,6 +36,8 @@ below only when the server is not connected or when a flag has no tool equivalen
 | how the project evolved, when something appeared or went away | `idxg history timeline` |
 | what the repo's own docs say (README, CLAUDE.md, design docs) | `idxg docs search`, `idxg docs list --module M` |
 | a crash report or stack trace to triage | `idxg crash <trace> --since <previous release tag>` (MCP `triage_crash`) |
+| which release first shipped a change, what is in a release | `idxg history releases`, `idxg history log --release <tag>` (MCP `get_releases`, `get_history` with `release`) |
+| code only tests keep alive | `idxg dead --test-only` (MCP `find_dead_code` with `test_only`) |
 
 ## Commands
 
@@ -172,6 +174,13 @@ Treat the output as the list of places and pull requests to read first.
   no body here, so without `gh auth login` the narration says only what files moved, and
   `idxg history digest` lists that as a gap. `--narrate` and the digest prefer the PR
   template section whose heading mentions what, why or context.
+- **Releases are version tags mapped to the history branch.** A commit's release is the
+  first tag whose branch point is at or after it; a fix merged to `main` after the cut and
+  synced to the release branch by a second commit shows on `main` as "not in any tagged
+  release yet", which is true of that commit. Read the sync PR for the release branch.
+- **`--test-only` is a candidate list too.** A production caller in an uncompiled file is
+  invisible, so a symbol "kept alive only by tests" may have a real caller the build
+  never saw. Check coverage before deleting.
 - **Digest areas are ordered by the code graph, tags by subject and labels.** A module the
   rest of the code calls a lot sorts early, a leaf feature late; `prod` means the word
   hotfix appeared, `build` means only tooling files changed. Neither is a judgement of
@@ -194,7 +203,7 @@ Treat the output as the list of places and pull requests to read first.
 Tools: `index_status`, `search_graph`, `trace_path`, `find_references`,
 `get_code_snippet`, `query_graph`, `check_index_coverage`, `get_architecture`,
 `get_schema`, `build_visualizer`; history and docs: `get_history`, `get_commit`,
-`get_churn`, `get_timeline`, `get_digest`, `list_docs`, `search_docs`, `get_doc`,
-`refresh_history`; crash triage: `triage_crash`. `get_history` with `narrate: true` gives
+`get_churn`, `get_timeline`, `get_digest`, `get_releases`, `list_docs`, `search_docs`,
+`get_doc`, `refresh_history`; crash triage: `triage_crash`. `get_history` with `narrate: true` gives
 one paragraph per commit. The server resolves the database from the session's
 working directory; pass `db` to override.

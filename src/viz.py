@@ -296,8 +296,19 @@ def slice_data(db, scope=None, limit=3000, edge_cap=60000, per_node_cap=45, deta
     finally:
         db.row_factory = prior_factory
 
+    test_only = []
+    try:
+        import deadcode
+        prior = db.row_factory
+        db.row_factory = _sq.Row
+        test_only = [[r["name"], r["kind"], r["module"] or "", r["rel"] or "", r["def_line"] or 0, r["test_modules"]]
+                     for r in deadcode.test_only(db, limit=400)]
+    except Exception:
+        pass
+    finally:
+        db.row_factory = prior_factory
     return {"meta": meta, "counts": counts, "edge_kinds": ekinds, "sym_kinds": kinds,
-            "dead": dead, "dead_total": total_dead,
+            "dead": dead, "dead_total": total_dead, "test_only": test_only,
             "layers": layers, "modules": modules, "mod_edges": mod_edges, "mod_layers": mod_layers,
             "mod_edge_details": mod_edge_details,
             "mod_edge_files": mod_edge_files,
@@ -514,6 +525,7 @@ function askBox(prompts) {
 /* ---------- module graph ---------- */
 let modState = null;
 const modOpts = { layer: '', q: '', top: 45, minCalls: 8, pin: '', view: 'orbit' };
+const modTrail = [];
 const LAYER_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#4caf50', '#9085e9', '#e66767'];
 let orbit = null;
 function modulesTab() {
@@ -543,6 +555,7 @@ function modulesTab() {
     <select id="modmin"><option value="8">pairs with 8+ call sites</option><option value="3">pairs with 3+ call sites</option><option value="1">every pair</option></select>`;
   wrap.append(filters);
   const count = el('div', 'loc'); count.id = 'modcount'; count.style.marginBottom = '6px'; wrap.append(count);
+  const trail = el('div', 'loc'); trail.id = 'modtrail'; trail.style.marginBottom = '6px'; trail.style.minHeight = '16px'; wrap.append(trail);
   const stage = el('div'); stage.id = 'modstage'; wrap.append(stage);
   const legend = el('div', 'orbit-legend'); legend.id = 'modlegend'; wrap.append(legend);
   s.append(wrap);
@@ -871,8 +884,44 @@ function paintModules() {
   });
 }
 
-function selectModule(i) {
+function renderTrail() {
+  const box = document.getElementById('modtrail');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!modTrail.length) return;
+  box.append(document.createTextNode('path: '));
+  modTrail.forEach((name, k) => {
+    if (k) box.append(document.createTextNode(' \u2192 '));
+    const a = el('a', null, name); a.style.color = k === modTrail.length - 1 ? 'var(--pink)' : 'var(--accent2)'; a.style.cursor = 'pointer';
+    a.title = 'go back to here';
+    a.onclick = () => { modTrail.splice(k + 1); goToModule(name, false); };
+    box.append(a);
+  });
+  const clear = el('a', null, '  clear'); clear.style.color = 'var(--dim)'; clear.style.cursor = 'pointer';
+  clear.onclick = () => { modTrail.length = 0; renderTrail(); };
+  box.append(clear);
+}
+
+function goToModule(name, push) {
+  if (push && modTrail[modTrail.length - 1] !== name) modTrail.push(name);
+  if (modTrail.length > 30) modTrail.shift();
+  if (!modState.idx.has(name)) {
+    // Not drawn under the current filters: isolate it so it and its partners come in.
+    modOpts.pin = name;
+    const iso = document.getElementById('modiso'); if (iso) iso.value = name;
+    buildModuleGraph({ stage: document.getElementById('modstage') });
+  }
+  selectModule(modState.idx.get(name), true);
+}
+
+function selectModule(i, fromTrail) {
   modState.sel = i;
+  if (i !== null && i !== undefined && !fromTrail) {
+    const name = modState.names[i];
+    if (modTrail[modTrail.length - 1] !== name) modTrail.push(name);
+    if (modTrail.length > 30) modTrail.shift();
+  }
+  renderTrail();
   paintModules();
   const info = document.getElementById('modinfo');
   info.innerHTML = '';
@@ -950,7 +999,7 @@ function modTree(title, rows, pick, color, inbound) {
     const line = el('div');
     line.append(document.createTextNode(last ? '\u2514\u2500 ' : '\u251c\u2500 '));
     const a = el('a', null, other);
-    a.onclick = () => selectModule(modState.idx.get(other));
+    a.onclick = () => goToModule(other, true);
     line.append(a);
     const tail = el('span', 'loc',
       `  Module <CALLS>  ${fmt(modState.size.get(other) || 0)} symbols (x${fmt(l.n)})`);
@@ -1282,6 +1331,30 @@ function deadTab() {
                    Object.entries(byModule).sort((a, b) => b[1] - a[1]).slice(0, 20)));
   s.append(g);
 
+  const to = D.test_only || [];
+  const tcard = el('div', 'card');
+  tcard.append(el('h2', null, `kept alive only by tests (${to.length}${to.length === 400 ? '+' : ''})`));
+  const tp = el('div');
+  tp.innerHTML = `Production symbols that something reaches, but every caller is in a test module.
+    Either the feature stopped using them and the tests kept them alive, or the production caller
+    lives in a file the build never compiled. Confirm with <code>idxg dead --test-only</code> and
+    <code>idxg coverage</code> before deleting.`;
+  tcard.append(tp);
+  const trows = el('div', 'rows'); trows.style.maxHeight = '40vh'; trows.style.marginTop = '8px';
+  let tg = null;
+  for (const [name, k, mod, file, line, nt] of to) {
+    const g = `${mod || '?'} (${file || 'external'})`;
+    if (g !== tg) { tg = g; trows.append(el('div', 'group', g)); }
+    const row = el('div', 'row');
+    row.append(el('span', 'nm', name), el('span', 'badge', k),
+               el('span', 'meta', `:${line}  ${nt} test module${nt === 1 ? '' : 's'}`));
+    row.onclick = () => { showTab('symbols'); document.getElementById('q').value = name; render(); };
+    trows.append(row);
+  }
+  if (!to.length) trows.append(el('div', 'empty', 'none found in the compiled build'));
+  tcard.append(trows);
+  s.append(tcard);
+
   const list = el('div', 'card');
   list.append(el('h2', null, `candidates (${D.dead.length} shown of ${fmt(D.dead_total)})`));
   const filters = el('div', 'filters');
@@ -1348,14 +1421,20 @@ function historyTab() {
   s.append(narratedCard());
 
   const story = el('div', 'card');
-  story.append(el('h2', null, 'the story so far'));
+  const storyHead = el('div'); storyHead.style.display = 'flex'; storyHead.style.alignItems = 'baseline'; storyHead.style.gap = '12px';
+  storyHead.append(el('h2', null, 'the story so far'));
+  const toggle = el('a', null, 'show'); toggle.style.color = 'var(--accent2)'; toggle.style.cursor = 'pointer'; toggle.style.fontSize = '11px';
+  storyHead.append(toggle, el('span', 'loc', 'one computed paragraph per period since the first commit; folded because most days it is not what you came for'));
+  story.append(storyHead);
+  const storyBody = el('div'); storyBody.hidden = true;
+  toggle.onclick = () => { storyBody.hidden = !storyBody.hidden; toggle.textContent = storyBody.hidden ? 'show' : 'hide'; };
   const intro = el('div', 'prose');
   const ip = el('p'); ip.textContent = H.overview.replace(/`/g, ''); intro.append(ip);
-  story.append(intro);
-  story.append(activityChart());
+  storyBody.append(intro);
+  storyBody.append(activityChart());
   const hint = el('div', 'loc', `one paragraph per ${H.granularity}, newest first; click a heading to see that period's largest changes`);
   hint.style.margin = '10px 0';
-  story.append(hint);
+  storyBody.append(hint);
   const eras = el('div');
   const byPeriod = new Map(H.eras.map(e => [e.period, e]));
   for (const p of [...H.narrative].reverse()) {
@@ -1384,9 +1463,23 @@ function historyTab() {
     box.append(h, facts, txt, more);
     eras.append(box);
   }
-  story.append(eras);
+  storyBody.append(eras);
+  story.append(storyBody);
   s.append(story);
 
+
+  if (H.releases && H.releases.length) {
+    const rc0 = el('div', 'card');
+    rc0.append(el('h2', null, 'releases'));
+    rc0.append(el('div', 'loc', `version tags by the day their branch left ${m.branch || 'main'}; commits counts what first shipped in each. Every change on this page carries its release; idxg history log --release <tag> lists one release.`));
+    const rt = el('table');
+    rt.innerHTML = '<thead><tr><th>release</th><th>branched</th><th>tagged</th><th class="num">commits first shipped</th></tr></thead>';
+    const rb = el('tbody');
+    for (const [tag, tagged, branched, , commits] of H.releases) {
+      const tr = el('tr'); tr.append(el('td', null, tag), el('td', 'loc', branched || ''), el('td', 'loc', tagged || ''), numTd(commits)); rb.append(tr);
+    }
+    rt.append(rb); rc0.append(rt); s.append(rc0);
+  }
 
   const g = el('div', 'grid2');
   const ch = el('div', 'card');
@@ -1407,9 +1500,10 @@ function historyTab() {
   const rc = el('div', 'card');
   rc.append(el('h2', null, `recent changes on ${m.branch || 'main'}`));
   const rows = el('div', 'rows');
-  for (const [sha, short, author, day, subject, pr, tickets, files, ins, del_] of H.recent) {
+  for (const [sha, short, author, day, subject, pr, tickets, files, ins, del_, release] of H.recent) {
     const r = el('div', 'row'); r.style.cursor = 'default'; r.style.flexWrap = 'wrap';
     r.append(el('span', 'sha', day), el('span', 'subj', subject));
+    if (release) r.append(el('span', 'badge', release));
     const meta = el('span', 'meta');
     meta.append(document.createTextNode(`${author}  ${files} files +${fmt(ins)} -${fmt(del_)} `));
     if (pr) {

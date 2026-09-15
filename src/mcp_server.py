@@ -86,6 +86,8 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "module": {"type": "string"}, "kind": {"type": "string", "description": "comma list"},
          "verify": {"type": "boolean", "description": "drop candidates named in another file"},
+         "test_only": {"type": "boolean", "description": "instead list production symbols that only test "
+                                                          "modules reach: candidates for code kept alive by tests"},
          "include_tests": {"type": "boolean"}, "include_vendor": {"type": "boolean"},
          "lang": {"type": "string", "enum": ["Swift", "ObjC", "C", "any"]},
          "limit": {"type": "integer", "default": 100}, "offset": {"type": "integer", "default": 0},
@@ -117,6 +119,7 @@ TOOLS = [
          "module": {"type": "string"}, "component": {"type": "string", "description": "module-depth directory"},
          "author": {"type": "string"}, "since": {"type": "string", "description": "YYYY-MM-DD"},
          "until": {"type": "string"}, "query": {"type": "string", "description": "substring of subject, body or ticket"},
+         "release": {"type": "string", "description": "only commits that first shipped in this release tag"},
          "with_files": {"type": "boolean"},
          "narrate": {"type": "boolean", "description": "one plain paragraph per commit: who, what, why "
                                                         "(from the PR description), which files and modules"},
@@ -155,6 +158,13 @@ TOOLS = [
          "frames": {"type": "integer", "default": 6}, "callers": {"type": "integer", "default": 5},
          "commits": {"type": "integer", "default": 5}, "max_bytes": {"type": "integer", "default": 12000},
          "db": {"type": "string"}}, "required": ["trace"]}},
+    {"name": "get_releases",
+     "description": "Version tags of the project: when each release branched off the history branch, "
+                    "when it was tagged, and how many commits first shipped in it. Every commit from "
+                    "get_history and get_commit carries its release, so 'which release has this "
+                    "feature' is one call.",
+     "inputSchema": {"type": "object", "properties": {
+         "limit": {"type": "integer", "default": 30}, "db": {"type": "string"}}}},
     {"name": "get_churn",
      "description": "Where change concentrates: commits, lines and authors per module, component "
                     "directory, file or author over a window (default the last 365 days).",
@@ -254,7 +264,7 @@ def call(name, a):
         return run(idxg.cmd_arch, ns(db=db, limit=a.get("limit", 20)))
     if name == "find_dead_code":
         return run(idxg.cmd_dead, ns(db=db, module=a.get("module"), kind=a.get("kind"),
-                                     verify=bool(a.get("verify")),
+                                     verify=bool(a.get("verify")), test_only=bool(a.get("test_only")),
                                      include_tests=bool(a.get("include_tests")),
                                      include_vendor=bool(a.get("include_vendor")),
                                      lang=a.get("lang", "Swift"), limit=a.get("limit", 100),
@@ -272,6 +282,7 @@ def call(name, a):
                                             author=a.get("author"), since=a.get("since"),
                                             until=a.get("until"), grep=a.get("query"),
                                             files=bool(a.get("with_files")), narrate=bool(a.get("narrate")),
+                                            release=a.get("release"),
                                             limit=a.get("limit", 30), max_bytes=a.get("max_bytes", 12000)))
     if name == "get_digest":
         return run(idxg.cmd_history_digest, ns(db=db, week=a.get("week"), since=a.get("since"),
@@ -284,6 +295,8 @@ def call(name, a):
         return run(idxg.cmd_crash, ns(db=db, trace=None, text=a["trace"], since=a.get("since"),
                                       frames=a.get("frames", 6), callers=a.get("callers", 5),
                                       commits=a.get("commits", 5), max_bytes=a.get("max_bytes", 12000)))
+    if name == "get_releases":
+        return run(idxg.cmd_history_releases, ns(db=db, limit=a.get("limit", 30)))
     if name == "get_churn":
         return run(idxg.cmd_history_churn, ns(db=db, since=a.get("since"), by=a.get("by", "module"),
                                               ext=a.get("ext"), limit=a.get("limit", 25)))

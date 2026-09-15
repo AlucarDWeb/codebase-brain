@@ -47,6 +47,7 @@ DEFAULT_CONFIG = {
     "history_prs": True,              # fetch pull request descriptions through gh when it is logged in
     "viz_history_weeks": 26,          # weekly digests embedded in the explorer
     "update_check": True,             # ask GitHub once a day whether a newer release exists (global only)
+    "history_release_tags": "",       # regex for version tags (blank = v1.2.3 or 1.2.3)
 }
 
 GLOBAL_ONLY = ("poll_minutes", "update_check")
@@ -68,6 +69,7 @@ CONFIG_HELP = {
     "history_prs": "fetch pull request descriptions through gh (needs gh auth login)",
     "viz_history_weeks": "how many weekly digests the explorer embeds",
     "update_check": "check GitHub once a day for a newer release, global only",
+    "history_release_tags": "regex that picks the git tags that are releases (blank = v1.2.3 or 1.2.3)",
 }
 
 

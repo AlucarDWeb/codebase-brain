@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS commit_files(sha TEXT, path TEXT, old_path TEXT, ins 
   module TEXT, component TEXT, ext TEXT);
 CREATE TABLE IF NOT EXISTS components(component TEXT PRIMARY KEY, first_sha TEXT, first_date TEXT,
   last_sha TEXT, last_date TEXT, commits INTEGER, alive INTEGER, module TEXT);
+CREATE TABLE IF NOT EXISTS releases(tag TEXT PRIMARY KEY, tag_sha TEXT, tag_date TEXT, base_sha TEXT,
+  base_committed TEXT, base_day TEXT);
 CREATE TABLE IF NOT EXISTS module_rank(module TEXT PRIMARY KEY, prefix TEXT, layer TEXT, calls_in INTEGER,
   calls_out INTEGER, symbols INTEGER);
 CREATE TABLE IF NOT EXISTS docs(path TEXT PRIMARY KEY, title TEXT, kind TEXT, module TEXT,
@@ -39,7 +41,8 @@ COMMIT_INSERT = """INSERT OR REPLACE INTO commits(sha, short, parents, author, e
   month, subject, body, pr, tickets, files, ins, del, seq) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
 # Columns added after the first release; _migrate adds them to an older history db.
 COMMIT_EXTRA = (("pr_title", "TEXT"), ("pr_body", "TEXT"), ("pr_labels", "TEXT"), ("pr_merged", "TEXT"),
-                ("pr_author", "TEXT"))
+                ("pr_author", "TEXT"), ("release", "TEXT"))
+RELEASE_TAG_RE = r"^v?\d+\.\d+(\.\d+)?$"
 PR_BODY_CAP = 6000
 PR_BATCH = 40
 # Top-level directories that hold build, CI and developer tooling rather than product code.
@@ -374,7 +377,7 @@ def sync_docs(db, root, branch, mapper, manifest_path=None, log=print):
 # ---------------------------------------------------------------- build
 
 def build(root, graph_db, branch=None, first_parent=True, full=False, since=None,
-          docs=True, prs=True, manifest_path=None, log=print):
+          docs=True, prs=True, manifest_path=None, release_tags=None, log=print):
     root = os.path.realpath(root)
     hdb_path = history_db_for(graph_db)
     os.makedirs(os.path.dirname(hdb_path), exist_ok=True)
@@ -445,6 +448,7 @@ def build(root, graph_db, branch=None, first_parent=True, full=False, since=None
         db.commit()
     _rebuild_components(db, root, branch, mapper)
     _rebuild_module_rank(db, graph_db, mapper)
+    _sync_releases(db, root, branch, release_tags or RELEASE_TAG_RE, log=log)
     if docs:
         sync_docs(db, root, branch, mapper, manifest_path, log=log)
     if prs:
@@ -470,6 +474,38 @@ def build(root, graph_db, branch=None, first_parent=True, full=False, since=None
             os.remove(hdb_path + suffix)
     log(f"  wrote {hdb_path} ({os.path.getsize(hdb_path) / 1e6:.1f} MB, {time.time() - t0:.1f}s)")
     return hdb_path, counts
+
+
+def _sync_releases(db, root, branch, tag_re, log=print):
+    """Version tags mapped to the point where their branch left the history branch, so every
+    commit can be labelled with the first release that contains it. Tags on the branch
+    itself map to themselves; tags on a release branch map to the fork point."""
+    pat = re.compile(tag_re)
+    tags = [t for t in git(root, "tag", "-l", check=False).split("\n") if t and pat.match(t)]
+    have = {r[0] for r in db.execute("SELECT tag FROM releases")}
+    new = [t for t in tags if t not in have]
+    for t in new:
+        info = git(root, "log", "-1", "--format=%H%x1f%cs", t + "^{commit}", check=False).strip()
+        if not info:
+            continue
+        tag_sha, _, tag_date = info.partition(FIELD)
+        base = git(root, "merge-base", tag_sha, branch, check=False).strip()
+        if not base:
+            continue
+        row = git(root, "log", "-1", "--format=%cI%x1f%cs", base, check=False).strip()
+        committed, _, day = row.partition(FIELD)
+        db.execute("INSERT OR REPLACE INTO releases VALUES(?,?,?,?,?,?)", (t, tag_sha, tag_date, base, committed, day))
+    gone = have - set(tags)
+    if gone:
+        db.executemany("DELETE FROM releases WHERE tag = ?", [(g,) for g in gone])
+    db.commit()
+    # Newer than a release's branch point means not in that release; the first release
+    # whose branch point is at or after the commit is the one that shipped it.
+    db.execute("CREATE INDEX IF NOT EXISTS ix_rel_base ON releases(base_committed)")
+    db.execute("""UPDATE commits SET release = (SELECT tag FROM releases r WHERE r.base_committed >= commits.committed
+                                                ORDER BY r.base_committed ASC, r.tag ASC LIMIT 1)""")
+    db.commit()
+    log(f"releases: {len(tags)} version tags, {len(new)} new" + (f", {len(gone)} removed" if gone else ""))
 
 
 def _rebuild_components(db, root, branch, mapper):
@@ -519,8 +555,11 @@ def pick_granularity(first_day, last_day):
 
 
 def commits_for(db, paths=None, module=None, component=None, author=None, since=None,
-                until=None, query=None, limit=50):
+                until=None, query=None, release=None, limit=50):
     where, args = [], []
+    if release:
+        where.append("c.release = ?")
+        args.append(release)
     join = ""
     if paths:
         join = "JOIN commit_files cf ON cf.sha = c.sha"
@@ -553,10 +592,17 @@ def commits_for(db, paths=None, module=None, component=None, author=None, since=
     if query:
         where.append("(c.subject LIKE ? OR c.body LIKE ? OR c.tickets LIKE ?)")
         args += [f"%{query}%"] * 3
-    sql = f"""SELECT DISTINCT c.sha, c.short, c.author, c.day, c.subject, c.pr, c.tickets, c.files, c.ins, c.del
+    sql = f"""SELECT DISTINCT c.sha, c.short, c.author, c.day, c.subject, c.pr, c.tickets, c.files, c.ins, c.del, c.release
               FROM commits c {join} {'WHERE ' + ' AND '.join(where) if where else ''}
               ORDER BY c.committed DESC LIMIT ?"""
     return db.execute(sql, args + [limit]).fetchall()
+
+
+def releases(db, limit=None):
+    rows = db.execute("""SELECT r.tag, r.tag_date, r.base_day, r.base_sha,
+                                (SELECT COUNT(*) FROM commits c WHERE c.release = r.tag) commits
+                         FROM releases r ORDER BY r.base_committed DESC""").fetchall()
+    return rows[:limit] if limit else rows
 
 
 def files_of(db, sha, limit=200):
@@ -1073,6 +1119,10 @@ def narrate_commit(row, files, web=""):
         parts.append(touch)
     if "pr_labels" in keys and row["pr_labels"]:
         parts.append("Labels: " + row["pr_labels"].replace(",", ", ") + ".")
+    if "release" in keys and row["release"]:
+        parts.append(f"It first shipped in release {row['release']}.")
+    elif "release" in keys:
+        parts.append("It is not in any tagged release yet.")
     return " ".join(parts)
 
 
@@ -1378,6 +1428,7 @@ def slice_for_viz(hdb_path, recent=60, churn_limit=40, weeks_limit=26):
             "churn90": [list(r) for r in churn(db, since=(datetime.date.today() - datetime.timedelta(days=90)).isoformat(),
                                                 by="module", limit=80)],
             "recent": [list(r) for r in commits_for(db, limit=recent)],
+            "releases": [list(r) for r in releases(db, limit=24)],
             "recent_narrated": narrated_commits(db, commits_for(db, limit=recent), m.get("remote_web", "")),
             "weeks": [{"week": w, "commits": n, **{"digest": week_digest(db, *week_bounds(w), m.get("remote_web", ""))}}
                       for w, n in weeks(db, limit=weeks_limit)],

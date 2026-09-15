@@ -49,6 +49,8 @@ CALLS = [
     ("get_history", {"limit": 10, "narrate": True}),
     ("get_digest", {}),
     ("triage_crash", {"trace": f"#0 0x0000000100000000 in {SYM}.init() at Fake.swift:1\n#1 0x0000000100000001 in {SYM}.description at Fake.swift:2", "frames": 2}),
+    ("get_releases", {"limit": 10}),
+    ("find_dead_code", {"test_only": True, "limit": 20}),
     ("get_churn", {}),
     ("get_timeline", {"periods": 3}),
     ("list_docs", {"kind": "readme"}),
