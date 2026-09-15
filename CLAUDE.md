@@ -127,6 +127,13 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
   contract the knowledge vaults compile from, so a re-run must produce zero new files when
   nothing changed.
 
+## Working routine
+
+`.claude/skills/dev-loop/SKILL.md` is the routine around these invariants: where the test
+project is, how to verify each layer, the release ritual, the writing rules, and the
+backlog with where the last session stopped. Update its last two sections at the end of a
+session.
+
 ## Verifying a change
 
 ```bash
