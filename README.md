@@ -483,7 +483,12 @@ project-specific quirks you add there survive every re-init.
 ## Updating
 
 `idxg status` (and the MCP `index_status` tool) asks GitHub at most once a day whether a
-newer release exists and prints a line when one does. `idxg update --check` asks now.
+newer release exists and prints a line when one does. The explorer does the same when it
+opens: a banner across the top says which release is out and which one made the page, with
+the command to run and a copy button, and links to the release notes. The banner also
+appears when the compiler has written more since the graph was built, with `idxg refresh`
+ready to copy. A page cannot run commands on your machine, so the copy button is as far as
+it goes. `idxg update --check` asks now.
 `idxg update` pulls the release into the checkout the CLI runs from and re-runs
 `install.sh`; graphs and history databases need no rebuild afterwards, but a running
 Claude Code session needs a restart to pick up the new MCP server code. Turn the daily

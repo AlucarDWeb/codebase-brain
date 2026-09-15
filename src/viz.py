@@ -67,6 +67,15 @@ canvas.orbit.dragging{cursor:grabbing}
 .orbit-legend span{display:inline-flex;align-items:center;gap:5px}
 .orbit-legend i{width:10px;height:10px;border-radius:50%;display:inline-block}
 @media(max-width:1000px){#modinfo > div[style*="grid-template-columns"]{grid-template-columns:1fr!important}}
+#banner{display:none;gap:14px;align-items:center;flex-wrap:wrap;padding:10px 18px;background:var(--panel2);
+  border-bottom:1px solid var(--line);font-size:12px}
+#banner.on{display:flex}
+#banner .msg{color:var(--fg)}
+#banner .msg b{color:var(--warn);font-weight:600}
+#banner code{background:var(--panel);border:1px solid var(--line);padding:2px 7px;border-radius:4px}
+#banner button{background:var(--accent);color:var(--bg);border:none;font-family:var(--mono);font-size:11px;padding:5px 11px;border-radius:4px;cursor:pointer;font-weight:600}
+#banner a{color:var(--accent2)}
+#banner .dismiss{margin-left:auto;color:var(--dim);cursor:pointer}
 .ask{margin-top:14px;border:1px solid var(--line);border-left:3px solid var(--accent2);border-radius:6px;padding:10px 12px;background:var(--panel2)}
 .ask h2{margin-bottom:6px}
 .ask .p{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;padding:6px 0;border-top:1px dotted var(--line);font-size:12px;line-height:1.45}
@@ -321,6 +330,7 @@ BODY = """
   <span class="path" id="storePath" title="__STORE__"></span>
   <span style="margin-left:auto"><span class="pill" id="themeToggle" style="cursor:pointer">theme</span></span>
 </header>
+<div id="banner"></div>
 <nav>
   <button data-tab="overview" class="on">overview</button>
   <button data-tab="modules">modules</button>
@@ -1695,6 +1705,49 @@ function docsTab() {
   render();
 }
 
+/* ---------- banner: update available, graph stale ---------- */
+function banner() {
+  const box = document.getElementById('banner');
+  const notes = [];
+  const T = D.tool || {};
+  const vt = v => String(v || '').replace(/^v/, '').split('.').map(x => parseInt(x, 10) || 0);
+  const newer = (a, b) => { const x = vt(a), y = vt(b); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+  const line = (html, cmd, extra) => {
+    const row = el('div'); row.style.display = 'flex'; row.style.gap = '12px'; row.style.alignItems = 'center'; row.style.flexWrap = 'wrap';
+    const m = el('span', 'msg'); m.innerHTML = html; row.append(m);
+    if (cmd) {
+      const c = el('code', null, cmd); row.append(c);
+      const b = el('button', null, 'copy command'); b.onclick = () => copyText(cmd, b); row.append(b);
+    }
+    if (extra) row.append(extra);
+    return row;
+  };
+  const paint = () => {
+    box.innerHTML = '';
+    for (const n of notes) box.append(n);
+    const d = el('span', 'dismiss', 'hide'); d.onclick = () => box.classList.remove('on'); box.append(d);
+    box.classList.toggle('on', notes.length > 0);
+  };
+  if (D.meta.stale === '1') {
+    notes.push(line(`The compiler has written more since this graph was built (${D.meta.stale_reason || 'index store changed'}). Refresh, then reopen this page:`, 'idxg refresh'));
+  }
+  const announce = (tag, url) => {
+    const a = el('a', null, 'release notes'); a.href = url || T.releases_url || '#'; a.target = '_blank';
+    notes.push(line(`<b>codebase-brain ${String(tag).replace(/^v/, '')} is out</b>, this page was made with ${T.version}. Update in a terminal, then run idxg viz:`, 'idxg update', a));
+    paint();
+  };
+  paint();
+  if (T.latest && newer(T.latest, T.version)) announce(T.latest, T.releases_url);
+  // Ask GitHub live; the API allows requests from a local file. Silence on failure.
+  if (T.releases_api && typeof fetch === 'function') {
+    fetch(T.releases_api, { headers: { Accept: 'application/vnd.github+json' } })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { if (j && j.tag_name && newer(j.tag_name, T.version) && !(T.latest && vt(T.latest).join('.') === vt(j.tag_name).join('.'))) announce(j.tag_name, j.html_url); })
+      .catch(() => {});
+  }
+}
+banner();
+
 /* ---------- tabs ---------- */
 function showTab(name) {
   for (const b of document.querySelectorAll('nav button')) b.classList.toggle('on', b.dataset.tab === name);
@@ -1737,6 +1790,13 @@ def render(data, out_path, title=None):
     project = data["meta"].get("project", "index-store graph")
     head = TEMPLATE_HEAD.replace("__TITLE__", title or f"{project} graph")
     data.setdefault("history", None)
+    import project as prj
+    try:
+        latest = prj.latest_release().get("tag")
+    except Exception:
+        latest = None
+    data["tool"] = {"version": prj.VERSION, "latest": latest, "releases_api": prj.RELEASES_API,
+                    "releases_url": prj.RELEASES_URL}
     h = data["history"]
     hist_note = (f"{int(h['meta'].get('count_commits') or 0):,} commits to {h['meta'].get('last_day', '')}"
                  if h else "not built")
