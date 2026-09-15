@@ -36,7 +36,7 @@ below only when the server is not connected or when a flag has no tool equivalen
 | how the project evolved, when something appeared or went away | `idxg history timeline` |
 | what the repo's own docs say (README, CLAUDE.md, design docs) | `idxg docs search`, `idxg docs list --module M` |
 | a crash report or stack trace to triage | `idxg crash <trace> --since <previous release tag>` (MCP `triage_crash`) |
-| which release first shipped a change, what is in a release | `idxg history releases`, `idxg history log --release <tag>` (MCP `get_releases`, `get_history` with `release`) |
+| which release first shipped a change, what is in a release | `idxg history releases`, `idxg history digest --release <tag>` (MCP `get_releases`, `get_digest` with `release`) |
 | code only tests keep alive | `idxg dead --test-only` (MCP `find_dead_code` with `test_only`) |
 
 ## Commands

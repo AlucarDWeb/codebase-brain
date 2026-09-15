@@ -136,13 +136,14 @@ TOOLS = [
          "db": {"type": "string"}},
          "required": ["sha"]}},
     {"name": "get_digest",
-     "description": "Weekly digest of the main branch: headline and stats for the window, the changes "
+     "description": "Weekly or per-release digest of the main branch: headline and stats for the window, the changes "
                     "that stood out, then every change narrated in plain language and grouped by area "
                     "(tooling first, then modules ordered by how much the rest of the code depends on "
                     "them, features, tests last). Defaults to the week of the last commit. Pass a "
                     "since/until pair for any window.",
      "inputSchema": {"type": "object", "properties": {
          "week": {"type": "string", "description": "ISO week, e.g. 2026-W36"},
+         "release": {"type": "string", "description": "digest of everything that first shipped in this release tag"},
          "since": {"type": "string"}, "until": {"type": "string"},
          "max_bytes": {"type": "integer", "default": 16000}, "db": {"type": "string"}}}},
     {"name": "triage_crash",
@@ -285,7 +286,7 @@ def call(name, a):
                                             release=a.get("release"),
                                             limit=a.get("limit", 30), max_bytes=a.get("max_bytes", 12000)))
     if name == "get_digest":
-        return run(idxg.cmd_history_digest, ns(db=db, week=a.get("week"), since=a.get("since"),
+        return run(idxg.cmd_history_digest, ns(db=db, week=a.get("week"), release=a.get("release"), since=a.get("since"),
                                                until=a.get("until"), list=False, limit=30, html=None,
                                                open=False, max_bytes=a.get("max_bytes", 16000)))
     if name == "get_commit":

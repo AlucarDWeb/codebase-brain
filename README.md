@@ -284,6 +284,7 @@ idxg history log --narrate --since 2026-09-01   # one plain paragraph per commit
 idxg history show '#1234'                 # one commit or PR in full: description, files, modules
 idxg history digest                       # this week: every change narrated, grouped by area
 idxg history digest --week 2026-W36 --html --open   # the same as a standalone page
+idxg history digest --release 1.329.0     # everything that first shipped in one release, narrated by area
 idxg history releases                     # version tags: when each branched, what first shipped in it
 idxg history log --release 1.329.0        # every change that first shipped in one release
 idxg history churn --by module            # where change concentrated in the last year
@@ -326,8 +327,13 @@ Version tags (`1.329.0`, `v2.3`; another shape via `idxg config history_release_
 are mapped to the point where their branch left the history branch. A commit belongs to the
 first release whose branch point is at or after it, so every commit in `log`, `show`,
 `get_history` and the explorer carries its release, `idxg history releases` lists the
-releases with what first shipped in each, and `--release <tag>` filters to one. A commit
+releases with what first shipped in each, and `--release <tag>` filters `log` to one. A commit
 merged after the latest branch point shows as not in any tagged release yet.
+
+`idxg history digest --release <tag>` (MCP `get_digest` with `release`) writes the digest of
+one release: headline, what stood out, and every change narrated and grouped by area, in
+the same layout as the weekly digest. The explorer's digest selector lists the eight most
+recent releases next to the weeks, and the releases card opens one with a click.
 
 ### Pull request descriptions
 

@@ -959,8 +959,14 @@ def cmd_history_digest(a):
             s, e = hist.week_bounds(w)
             print(f"  {w}  {s} to {e}  {n:>4} commits")
         return
-    start, end = _resolve_window(a, hist, hdb)
-    data = hist.week_digest(hdb, start, end, m.get("remote_web", ""))
+    if getattr(a, "release", None):
+        data = hist.release_digest(hdb, a.release, m.get("remote_web", ""))
+        if not data:
+            raise SystemExit(f"no commits first shipped in release {a.release!r}; idxg history releases lists the tags")
+        start, end = data["window"]["start"], data["window"]["end"]
+    else:
+        start, end = _resolve_window(a, hist, hdb)
+        data = hist.week_digest(hdb, start, end, m.get("remote_web", ""))
     if getattr(a, "json", False):
         print(json.dumps(data, indent=1, ensure_ascii=False))
         return
@@ -968,7 +974,8 @@ def cmd_history_digest(a):
     if html_arg:
         graph = db_path(a.db)
         out = (os.path.expanduser(html_arg) if html_arg != "auto" else
-               os.path.join(os.path.dirname(graph), os.path.basename(graph).replace(".db", f"-digest-{start}.html")))
+               os.path.join(os.path.dirname(graph), os.path.basename(graph).replace(
+                   ".db", f"-digest-{getattr(a, 'release', None) or start}.html")))
         with open(out, "w") as f:
             f.write(hist.render_digest(data))
         print(f"wrote {out}  ({os.path.getsize(out) / 1024:.0f} KB, {data['window']['commits']} changes)")
@@ -1861,6 +1868,7 @@ def build_parser():
     h.set_defaults(hfn=cmd_history_releases)
     h = hs.add_parser("digest", help="weekly digest: every change narrated, grouped by area")
     h.add_argument("--week", help="ISO week, e.g. 2026-W36 (default: the week of the last commit)")
+    h.add_argument("--release", help="digest of everything that first shipped in this release tag")
     h.add_argument("--since"); h.add_argument("--until")
     h.add_argument("--list", action="store_true", help="list weeks with commit counts")
     h.add_argument("--limit", type=int, default=30, help="weeks shown by --list")

@@ -1471,12 +1471,22 @@ function historyTab() {
   if (H.releases && H.releases.length) {
     const rc0 = el('div', 'card');
     rc0.append(el('h2', null, 'releases'));
-    rc0.append(el('div', 'loc', `version tags by the day their branch left ${m.branch || 'main'}; commits counts what first shipped in each. Every change on this page carries its release; idxg history log --release <tag> lists one release.`));
+    rc0.append(el('div', 'loc', `version tags by the day their branch left ${m.branch || 'main'}; commits counts what first shipped in each. Click a release to read its digest above, every change explained; idxg history digest --release <tag> gives the same.`));
     const rt = el('table');
-    rt.innerHTML = '<thead><tr><th>release</th><th>branched</th><th>tagged</th><th class="num">commits first shipped</th></tr></thead>';
+    rt.innerHTML = '<thead><tr><th>release</th><th>branched</th><th>tagged</th><th class="num">commits first shipped</th><th></th></tr></thead>';
     const rb = el('tbody');
+    const withDigest = new Set((H.release_digests || []).map(d => d.window.release));
     for (const [tag, tagged, branched, , commits] of H.releases) {
-      const tr = el('tr'); tr.append(el('td', null, tag), el('td', 'loc', branched || ''), el('td', 'loc', tagged || ''), numTd(commits)); rb.append(tr);
+      const tr = el('tr');
+      const td = el('td');
+      if (withDigest.has(tag)) {
+        const a = el('a', null, tag); a.style.color = 'var(--accent2)'; a.style.cursor = 'pointer';
+        a.onclick = () => { const sel2 = document.getElementById('digestsel'); if (sel2) { sel2.value = 'r:' + tag; sel2.dispatchEvent(new Event('input')); sel2.closest('.card').scrollIntoView({ block: 'start' }); } };
+        td.append(a);
+      } else td.textContent = tag;
+      tr.append(td, el('td', 'loc', branched || ''), el('td', 'loc', tagged || ''), numTd(commits),
+                el('td', 'loc', withDigest.has(tag) ? 'digest' : ''));
+      rb.append(tr);
     }
     rt.append(rb); rc0.append(rt); s.append(rc0);
   }
@@ -1540,21 +1550,35 @@ function weeklyCard() {
   head.append(el('h2', null, 'week by week'));
   const wk = (H.weeks || []);
   if (!wk.length) { card.append(head, el('div', 'empty', 'no weeks to show')); return card; }
-  const sel = el('select'); sel.style.width = 'auto';
+  const sel = el('select'); sel.style.width = 'auto'; sel.id = 'digestsel';
+  const gw = document.createElement('optgroup'); gw.label = 'weeks';
   for (const w of [...wk].reverse()) {
     const o = el('option', null, `${w.week}  ${w.digest.window.start} to ${w.digest.window.end}  (${w.commits} changes)`);
-    o.value = w.week; sel.append(o);
+    o.value = 'w:' + w.week; gw.append(o);
   }
-  const hint = el('span', 'loc', `${wk.length} most recent weeks, every change narrated; the same layout idxg history digest --html writes`);
+  sel.append(gw);
+  const rds = H.release_digests || [];
+  if (rds.length) {
+    const gr = document.createElement('optgroup'); gr.label = 'releases: what first shipped in each';
+    for (const d of rds) {
+      const o = el('option', null, `${d.window.release}  ${d.window.start} to ${d.window.end}  (${d.window.commits} changes)`);
+      o.value = 'r:' + d.window.release; gr.append(o);
+    }
+    sel.append(gr);
+  }
+  const hint = el('span', 'loc', `${wk.length} most recent weeks and ${(H.release_digests || []).length} releases, every change narrated; the same layout idxg history digest --html writes`);
   head.append(sel, hint);
   card.append(head);
   const frame = document.createElement('iframe');
   frame.style.width = '100%'; frame.style.border = '1px solid var(--line)'; frame.style.borderRadius = '6px';
   frame.style.height = '900px'; frame.style.background = 'transparent';
   card.append(frame);
-  const byWeek = new Map(wk.map(w => [w.week, w]));
+  const byWeek = new Map(wk.map(w => ['w:' + w.week, w.digest]));
+  for (const d of rds) byWeek.set('r:' + d.window.release, d);
   const show = () => {
-    const w = byWeek.get(sel.value);
+    const digest = byWeek.get(sel.value);
+    if (!digest) return;
+    const w = { digest };
     const theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
     const view = Object.assign({}, w.digest); delete view.window;
     const page = H.template.replace('{{TITLE}}', `${w.digest.eyebrow[0]} digest, ${w.digest.window.label}`)
