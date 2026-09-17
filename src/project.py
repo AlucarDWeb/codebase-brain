@@ -1,7 +1,7 @@
 """Project registry, store detection and staleness for codebase-brain."""
 import hashlib, json, os, plistlib, shutil, subprocess, time
 
-VERSION = "0.2.12"
+VERSION = "0.2.13"
 CONFIG_DIR = os.path.expanduser("~/.config/codebase-brain")
 CACHE_DIR = os.path.expanduser("~/.cache/codebase-brain")
 REGISTRY = os.path.join(CONFIG_DIR, "projects.json")
