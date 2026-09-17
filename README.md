@@ -44,7 +44,8 @@ logged in; everything else works without it.
 
 `./install.sh` registers the MCP server with Claude Code and links the `codebase-brain`
 skill, which holds the rules, the tool table and the caveats. `idxg init` in a project
-writes two short things into it: a project skill (`.claude/skills/project-brain/SKILL.md`)
+writes two short things into it: a project skill named after the project
+(`.claude/skills/<project>-brain/SKILL.md`, so it never shadows the global one)
 with the facts specific to that project (coverage, largest modules, history reach) and a
 `## Project notes` section that is yours, and a block in the project's CLAUDE.md that
 points at both. From then on the agent picks the tools by

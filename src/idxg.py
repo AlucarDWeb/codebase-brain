@@ -1229,11 +1229,43 @@ LEGACY_CLAUDE_START = "<!-- ios-codebase-indexer:start -->"
 LEGACY_CLAUDE_END = "<!-- ios-codebase-indexer:end -->"
 LAUNCH_LABEL = "com.codebase-brain.autoindex"
 LEGACY_LAUNCH_LABEL = "com.ios-codebase-indexer.autoindex"
-# The per-project skill gets its own name so it never collides with the global skill
-# installed under ~/.claude/skills/codebase-brain.
-PROJECT_SKILL = "project-brain"
-LEGACY_PROJECT_SKILLS = ("codebase-index", "codebase-brain")
+# The per-project skill is named after the project so it never collides with the global
+# skill installed under ~/.claude/skills/codebase-brain.
+GLOBAL_SKILL = "codebase-brain"
+LEGACY_PROJECT_SKILLS = ("codebase-index", "codebase-brain", "project-brain")
+# Every skill this tool generates carries this phrase in its frontmatter description, which
+# is how init and deinit recognise one written under a name the project no longer has.
+SKILL_SIGNATURE = "as indexed by codebase-brain"
 NOTES_MARKER = "## Project notes"
+
+
+def project_skill_name(project):
+    """Skill directory for a project: its slug plus -brain, never the global skill's name."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (project or "").lower()).strip("-") or "project"
+    slug = re.sub(r"-?brain$", "", slug).strip("-") or "project"
+    skill = f"{slug}-brain"
+    return skill if skill != GLOBAL_SKILL else f"{slug}-project-brain"
+
+
+def _generated_skill_dirs(root, keep=None):
+    """Skill directories this tool wrote: the legacy names, plus anything carrying the
+    signature, minus `keep`. A renamed project leaves its old skill behind otherwise."""
+    base = os.path.join(root, ".claude", "skills")
+    found = []
+    for name in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+        if name == keep:
+            continue
+        d = os.path.join(base, name)
+        skill = os.path.join(d, "SKILL.md")
+        if not os.path.exists(skill):
+            continue
+        if name in LEGACY_PROJECT_SKILLS:
+            found.append(d)
+            continue
+        with open(skill) as f:
+            if SKILL_SIGNATURE in f.read():
+                found.append(d)
+    return found
 
 
 def _markers_in(text):
@@ -1279,10 +1311,11 @@ def project_stats(db_file):
 def install_project_skill(root, db_file):
     m, n, mods, langs = project_stats(db_file)
     name = m.get("project") or os.path.basename(root)
-    d = os.path.join(root, ".claude", "skills", PROJECT_SKILL)
+    skill_name = project_skill_name(name)
+    d = os.path.join(root, ".claude", "skills", skill_name)
     os.makedirs(d, exist_ok=True)
-    for legacy in LEGACY_PROJECT_SKILLS:
-        _remove_skill_dir(os.path.join(root, ".claude", "skills", legacy), keep_notes_into=d)
+    for old_dir in _generated_skill_dirs(root, keep=skill_name):
+        _remove_skill_dir(old_dir, keep_notes_into=d)
     tracked, covered = int(m.get("coverage_tracked") or 0), int(m.get("coverage_covered") or 0)
     coverage = (f"{100 * covered / tracked:.0f}% of tracked source files ({covered:,} of {tracked:,}) were compiled "
                 f"into the graph; symbols that live only in the rest cannot be found or traced here."
@@ -1299,7 +1332,7 @@ def install_project_skill(root, db_file):
                         f"{int(hm.get('count_docs') or 0)} markdown documents from the repository.")
     lang_line = ", ".join(f"{k} {v:,}" for k, v in sorted(langs.items(), key=lambda kv: -kv[1]) if k)
     body = f"""---
-name: project-brain
+name: {skill_name}
 description: Facts about {name}'s code graph, commit history and docs as indexed by codebase-brain (coverage, largest modules, history reach) plus this project's own notes. Use together with the codebase-brain skill for who calls X, who changed X and why, what shipped, crash triage, or what the repo's docs say.
 ---
 
@@ -1355,7 +1388,7 @@ server is connected (`trace_path`, `search_graph`, `get_history`, `triage_crash`
 `search_docs`, ...); `idxg` in a shell is the fallback. The graph is a snapshot of the last
 compile and covers only what was compiled, so treat a file with no index records as
 unproven rather than unused. Rules and tool table: the `codebase-brain` skill. This
-project's facts and notes: `.claude/skills/project-brain/SKILL.md`. Missing `idxg`?
+project's facts and notes: `.claude/skills/{project_skill_name(name)}/SKILL.md`. Missing `idxg`?
 Install it from https://github.com/AlucarDWeb/codebase-brain and run `idxg init` here.
 {CLAUDE_END}"""
     path = target or os.path.join(root, "CLAUDE.md")
@@ -1387,10 +1420,8 @@ def cmd_deinit(a):
     entry = reg.get(root, {})
     removed, kept = [], []
 
-    for skill_dir in (PROJECT_SKILL,) + LEGACY_PROJECT_SKILLS:
-        skill = os.path.join(root, ".claude", "skills", skill_dir, "SKILL.md")
-        if not os.path.exists(skill):
-            continue
+    for skill_dir in _generated_skill_dirs(root):
+        skill = os.path.join(skill_dir, "SKILL.md")
         with open(skill) as f:
             had_notes = NOTES_MARKER in f.read()
         if had_notes and not a.force:
