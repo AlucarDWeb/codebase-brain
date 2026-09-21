@@ -12,8 +12,8 @@ the CLI stayed `idxg`.
 |---|---|---|
 | `src/idxstore.py` | 112 | ctypes bindings for `libIndexStore.dylib`: units, records, occurrences, symbol relations |
 | `src/build.py` | 492 | parallel extractor, SQLite writer, atomic swap, registry update |
-| `src/project.py` | 316 | project registry, store detection, layered config, staleness |
-| `src/idxg.py` | 1751 | the CLI: every subcommand, plus the shared query helpers |
+| `src/project.py` | 395 | project registry, store detection, layered config, staleness |
+| `src/idxg.py` | 2063 | the CLI: every subcommand, plus the shared query helpers |
 | `src/viz.py` | 1161 | HTML explorer: data slicing and the whole page as one Python string |
 | `src/deadcode.py` | 98 | dead-code candidate query and its text cross-check |
 | `src/history.py` | 1513 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; per-commit narration, weekly digest, timeline, vault export |
@@ -101,6 +101,12 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
   and state why they truncated. Summary calls cache their expensive counts in `meta` at
   build time. Keep new tools in that shape, and re-run `bench/bench_mcp.py` if you touch
   an output path.
+- **The background agent is installed by default and stays off once turned off.**
+  `install.sh` runs `idxg autoindex --if-enabled --watch`, so a first install gets the
+  launchd agent and `idxg update` keeps it current. `--uninstall` writes
+  `autoindex: false` into the global config, which both that flag and `NO_AUTOINDEX=1`
+  honour, and a reinstall keeps whatever watch setting the plist already had. `idxg init`
+  rewrites the plist so the new project's store joins the watch list.
 - **The old name must keep working for anyone who installed it.** `project.py` moves the
   legacy config and cache directories on import and rewrites registry paths; `idxg init`
   and `deinit` recognise the `ios-codebase-indexer` CLAUDE.md markers and the

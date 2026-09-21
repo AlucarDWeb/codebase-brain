@@ -96,6 +96,10 @@ coverage. The database lands at
 `~/.cache/codebase-brain/<project>.db` and `idxg` resolves it from the current
 directory's name.
 
+A launchd agent installed with the tool rebuilds any registered project whose store has
+changed, so in most cases the graph is already current. `idxg autoindex --status` says
+whether it is running and what it last did; `idxg refresh` rebuilds now.
+
 ## Operational notes and gotchas
 
 - **It is a snapshot of the last compile, not the working tree.** After edits, line

@@ -1570,7 +1570,13 @@ def cmd_init(a):
     print("  idxg history timeline  the project's history in prose")
     print("  idxg docs search <q>   the repo's own docs")
     print("  idxg open              the visual explorer")
-    print("  idxg autoindex --install   keep it fresh in the background")
+    if os.path.exists(plist_path()):
+        watched = install_agent(watch=agent_watches(), quiet=True)
+        print("\nthe background agent refreshes this project too" +
+              (f", and now watches {watched} index store dir(s)" if watched else
+               f", every {prj.effective_config().get('poll_minutes', 15)} min"))
+    else:
+        print("  idxg autoindex --install --watch   keep it fresh in the background")
 
 
 def cmd_refresh(a):
@@ -1713,19 +1719,40 @@ def cmd_autoindex(a):
         subprocess.run(["launchctl", "unload", p], capture_output=True)
         if os.path.exists(p):
             os.remove(p)
+        prj.set_config("autoindex", False, None)
         print(f"removed {p}")
+        print("  install.sh will leave it off; `idxg autoindex --install` turns it back on")
         return
-    # install
-    _remove_legacy_agent()
-    minutes = a.every or prj.effective_config().get("poll_minutes", 15)
+    if a.if_enabled and not prj.effective_config().get("autoindex", True):
+        print("autoindex is off in your config; leaving it off")
+        return
     if a.every:
         prj.set_config("poll_minutes", a.every, None)
+    if not a.if_enabled:
+        prj.set_config("autoindex", True, None)
+    install_agent(minutes=a.every, watch=a.watch or agent_watches())
+
+
+def agent_watches():
+    """Whether the installed agent triggers on index-store writes, so a reinstall keeps
+    the choice the user made the first time."""
+    p = plist_path()
+    if not os.path.exists(p):
+        return False
+    with open(p) as f:
+        return "<key>WatchPaths</key>" in f.read()
+
+
+def install_agent(minutes=None, watch=False, quiet=False):
+    log = os.path.join(prj.CACHE_DIR, "autoindex.log")
+    _remove_legacy_agent()
+    minutes = minutes or prj.effective_config().get("poll_minutes", 15)
     os.makedirs(prj.CACHE_DIR, exist_ok=True)
     p = plist_path()
     os.makedirs(os.path.dirname(p), exist_ok=True)
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "idxg.py")
     watch_paths = []
-    if a.watch:
+    if watch:
         for entry in prj.load_registry().values():
             for st in entry.get("stores") or []:
                 units = os.path.join(st, "v5", "units")
@@ -1760,6 +1787,8 @@ def cmd_autoindex(a):
         f.write(body)
     subprocess.run(["launchctl", "unload", p], capture_output=True)
     r = subprocess.run(["launchctl", "load", p], capture_output=True, text=True)
+    if quiet:
+        return len(set(watch_paths))
     print(f"installed {p}")
     if watch_paths:
         print(f"  watches {len(set(watch_paths))} index store dir(s); a build that writes records")
@@ -1768,6 +1797,7 @@ def cmd_autoindex(a):
     print(f"  log: {log}")
     if r.returncode != 0:
         print("  launchctl load said:", (r.stderr or r.stdout).strip())
+    return len(set(watch_paths))
 
 
 def build_parser():
@@ -2010,6 +2040,8 @@ def build_parser():
     g.add_argument("--uninstall", action="store_true")
     g.add_argument("--status", action="store_true")
     g.add_argument("--run-once", action="store_true", help="what the agent runs on each tick")
+    g.add_argument("--if-enabled", action="store_true",
+                   help="install only while autoindex is on in the config; what install.sh runs")
     p.add_argument("--every", type=int, metavar="MINUTES")
     p.add_argument("--jobs", type=int)
     p.add_argument("--watch", action="store_true",

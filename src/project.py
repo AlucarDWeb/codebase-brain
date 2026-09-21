@@ -37,6 +37,7 @@ DEFAULT_CONFIG = {
     "viz_limit": 1500,                # symbols in the repo-wide explorer slice
     "viz_per_node_cap": 25,           # edges kept per symbol per direction
     "viz_scope": "",                  # module or path glob the explorer defaults to
+    "autoindex": True,                # keep the background refresh agent installed (global only)
     "poll_minutes": 15,               # autoindex agent interval (global only)
     "jobs": max(2, (os.cpu_count() or 4) - 2),
     "claude_md_path": "",             # where init writes the agent note (blank = CLAUDE.md)
@@ -51,7 +52,7 @@ DEFAULT_CONFIG = {
     "history_release_tags": "",       # regex for version tags (blank = v1.2.3 or 1.2.3)
 }
 
-GLOBAL_ONLY = ("poll_minutes", "update_check")
+GLOBAL_ONLY = ("autoindex", "poll_minutes", "update_check")
 
 CONFIG_HELP = {
     "auto_refresh_on_query": "reindex inline when a query finds the graph stale",
@@ -59,6 +60,7 @@ CONFIG_HELP = {
     "viz_limit": "symbols in the repo-wide explorer slice (0 = all)",
     "viz_per_node_cap": "edges kept per symbol per direction in the explorer",
     "viz_scope": "module name or path glob the explorer defaults to",
+    "autoindex": "keep the background refresh agent installed; install.sh honours it",
     "poll_minutes": "autoindex agent interval, global only",
     "jobs": "parallel extractor workers",
     "claude_md_path": "where init writes the agent note (blank = <project>/CLAUDE.md)",

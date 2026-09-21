@@ -33,8 +33,9 @@ cd codebase-brain
 ```
 
 The script links `idxg`, `idxg-build` and `idxg-history` into `~/.local/bin`, links the
-Claude Code skill into `~/.claude/skills/`, and registers the MCP server when the `claude`
-CLI is present.
+Claude Code skill into `~/.claude/skills/`, registers the MCP server when the `claude` CLI
+is present, and installs the launchd agent that keeps every project you index up to date.
+`NO_AUTOINDEX=1 ./install.sh` leaves that agent out.
 
 You need macOS with Xcode installed (for `libIndexStore.dylib`) and Python 3.9 or newer.
 There are no third-party packages. Pull request descriptions need the GitHub CLI (`gh`),
@@ -224,15 +225,21 @@ it. It gives you the places and the pull requests to read first, with the exact 
    candidates, the project's history (a weekly digest, every recent commit narrated, and
    the story period by period), and the repository's docs.
 
-7. Keep it fresh.
+7. Keeping it fresh needs nothing from you.
+
+   `./install.sh` installed a launchd agent that reindexes any registered project whose
+   index store has changed. It wakes on a store write, waits for the build to stop
+   writing, and checks every 15 minutes as a fallback. `idxg init` adds each new project's
+   store to what it watches.
 
    ```bash
-   idxg autoindex --install --every 20
+   idxg autoindex --status              # is it running, and what did it do
+   idxg autoindex --install --every 20  # change the fallback interval
+   idxg autoindex --uninstall           # stop it; install.sh will not put it back
    ```
 
-   A launchd agent then reindexes any registered project whose store has changed. Without
-   it, run `idxg refresh` after builds. Queries warn on stderr when the graph has fallen
-   behind.
+   Without the agent, run `idxg refresh` after builds. Queries warn on stderr when the
+   graph has fallen behind either way.
 
 8. Restart your agent. The MCP server was registered at install time, but a Claude Code
    session that was already running will not see it until you restart. The project skill
@@ -505,7 +512,9 @@ idxg deinit --purge    # also delete the graph, the history db, the explorer, di
 
 `deinit` keeps a project skill that has a `## Project notes` section unless you pass
 `--force`, and never touches a vault you pointed `history_vault` at. The launchd agent is
-per machine rather than per project; `idxg autoindex --uninstall` removes it.
+per machine rather than per project; `idxg autoindex --uninstall` removes it and records
+that choice, so a later `./install.sh` or `idxg update` leaves it off. `NO_AUTOINDEX=1
+./install.sh` skips it on a first install.
 
 ## How it works
 

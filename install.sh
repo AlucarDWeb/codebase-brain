@@ -28,6 +28,15 @@ else
     echo "claude CLI not found; skipping MCP registration"
 fi
 
+# The background agent keeps every registered project's graph current. It is installed by
+# default; `idxg autoindex --uninstall` removes it and records the choice, and NO_AUTOINDEX=1
+# skips it here.
+if [ "${NO_AUTOINDEX:-0}" = "1" ]; then
+    echo "skipped the background refresh agent (NO_AUTOINDEX=1)"
+else
+    python3 "$REPO/src/idxg.py" autoindex --if-enabled --watch | sed 's/^/  /' || true
+fi
+
 case ":$PATH:" in
     *":$BIN:"*) ;;
     *) echo "note: $BIN is not on your PATH" ;;
@@ -35,4 +44,4 @@ esac
 
 echo
 echo "next: cd into an indexed Swift project and run"
-echo "  idxg-build --jobs 8 && idxg status"
+echo "  idxg init"
