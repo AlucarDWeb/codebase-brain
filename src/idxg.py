@@ -1379,17 +1379,20 @@ def install_claude_md(root, db_file, target=None):
     note = f"""{CLAUDE_START}
 ## Code graph, history and docs (codebase-brain)
 
-This repository is indexed by codebase-brain: a compiler-accurate code graph, the main
-branch's commit history with pull request descriptions, and the repository's own docs.
-For any question about who calls what, where something is used, what a change would
-affect, who changed something and why, what shipped, or what a crash report points at,
-ask the graph before reading or grepping code. Use the `codebase-brain` MCP tools when the
-server is connected (`trace_path`, `search_graph`, `get_history`, `triage_crash`,
-`search_docs`, ...); `idxg` in a shell is the fallback. The graph is a snapshot of the last
-compile and covers only what was compiled, so treat a file with no index records as
+codebase-brain is optional here: some people have it installed and some do not. Check
+before using it. It is available when the `codebase-brain` MCP tools are connected
+(`trace_path`, `search_graph`, `get_history`, `triage_crash`, `search_docs`, ...) or when
+`idxg` runs in a shell. If neither is there, skip this section and work as usual: do not
+install it, do not ask about it, and do not mention it.
+
+When it is available, it holds a compiler-accurate code graph, the main branch's commit
+history with pull request descriptions, and the repository's own docs. For questions about
+who calls what, where something is used, what a change would affect, who changed something
+and why, what shipped, or what a crash report points at, ask it before reading or grepping
+code. Prefer the MCP tools; `idxg` in a shell is the fallback. The graph is a snapshot of the
+last compile and covers only what was compiled, so treat a file with no index records as
 unproven rather than unused. Rules and tool table: the `codebase-brain` skill. This
-project's facts and notes: `.claude/skills/{project_skill_name(name)}/SKILL.md`. Missing `idxg`?
-Install it from https://github.com/AlucarDWeb/codebase-brain and run `idxg init` here.
+project's facts and notes, when present: `.claude/skills/{project_skill_name(name)}/SKILL.md`.
 {CLAUDE_END}"""
     path = target or os.path.join(root, "CLAUDE.md")
     existing = ""
