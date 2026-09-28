@@ -45,13 +45,18 @@ logged in; everything else works without it.
 
 `./install.sh` registers the MCP server with Claude Code and links the `codebase-brain`
 skill, which holds the rules, the tool table and the caveats. `idxg init` in a project
-writes two short things into it: a project skill named after the project
+writes a project skill named after the project
 (`.claude/skills/<project>-brain/SKILL.md`, so it never shadows the global one)
 with the facts specific to that project (coverage, largest modules, history reach) and a
-`## Project notes` section that is yours, and a block in the project's CLAUDE.md that
-points at both. From then on the agent picks the tools by
-itself, and both files tell it to prefer the MCP tools over running `idxg` in a shell when
+`## Project notes` section that is yours. From then on the agent picks the tools by
+itself, and the skill tells it to prefer the MCP tools over running `idxg` in a shell when
 the server is connected. Nothing in the agent's prompt needs to change.
+
+The project's CLAUDE.md can carry a short block that points agents at the graph. `idxg
+init` leaves CLAUDE.md alone unless you pass `--claude-md`, because the block belongs in
+the repository: one person writes it once with `idxg init --claude-md`, commits it, and
+everyone who clones the repo has it. `idxg deinit` leaves it in place too, unless you pass
+`--claude-md` there as well.
 
 The tools, by the question they answer:
 
@@ -181,7 +186,8 @@ it. It gives you the places and the pull requests to read first, with the exact 
    ```
 
    It prints the stores it found, builds the graph, extracts the history and the docs,
-   renders the explorer, and installs a project skill and a CLAUDE.md note for agents.
+   renders the explorer, and installs a project skill for agents. Add `--claude-md` the
+   first time a repository is set up to also write the CLAUDE.md block, then commit it.
    Expect seconds on a small package and a few minutes on a large monorepo (the graph
    takes two to four minutes, the first history extract about two more, and fetching
    pull request descriptions a few more on top). If it reports no index store, go back
@@ -243,7 +249,7 @@ it. It gives you the places and the pull requests to read first, with the exact 
 
 8. Restart your agent. The MCP server was registered at install time, but a Claude Code
    session that was already running will not see it until you restart. The project skill
-   and the CLAUDE.md note are picked up per project with no restart.
+   and the CLAUDE.md block are picked up per project with no restart.
 
 ### If something looks wrong
 
@@ -505,7 +511,8 @@ check off with `idxg config --global update_check=false`.
 ## Removing a project
 
 ```bash
-idxg deinit            # remove the project skill and the CLAUDE.md block, forget the project
+idxg deinit            # remove the project skill and forget the project
+idxg deinit --claude-md  # also strip the CLAUDE.md block (a shared change: commit it)
 idxg deinit --purge    # also delete the graph, the history db, the explorer, digests and
                        # the default vault export under ~/.cache/codebase-brain
 ```

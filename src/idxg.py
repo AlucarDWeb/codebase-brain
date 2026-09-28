@@ -34,7 +34,7 @@ def db_path(arg):
     if os.path.exists(db):
         return db
     raise SystemExit(f"no graph for {root}\n"
-                     f"  run: idxg init            (index this project, write the skill + CLAUDE.md note)\n"
+                     f"  run: idxg init            (index this project and write its skill)\n"
                      f"  or:  idxg --db <path> ...  (query another project's graph)")
 
 
@@ -1436,8 +1436,10 @@ def cmd_deinit(a):
                 except OSError:
                     break
 
-    for candidate in {os.path.join(root, "CLAUDE.md"),
-                      os.path.join(root, prj.effective_config(root).get("claude_md_path") or "CLAUDE.md")}:
+    # The CLAUDE.md block is usually committed and shared, so one person's deinit must not strip it.
+    candidates = {os.path.join(root, "CLAUDE.md"),
+                  os.path.join(root, prj.effective_config(root).get("claude_md_path") or "CLAUDE.md")}
+    for candidate in candidates if a.claude_md else ():
         if not os.path.exists(candidate):
             continue
         with open(candidate) as f:
@@ -1978,15 +1980,18 @@ def build_parser():
     d.set_defaults(hfn=cmd_docs_show)
     p.set_defaults(fn=cmd_docs, no_stale_check=True)
 
-    p = sub.add_parser("init", help="index a project and install its skill + CLAUDE.md note")
+    p = sub.add_parser("init", help="index a project and install its skill")
     p.add_argument("path", nargs="?", help="project root (default: detected from the cwd)")
     p.add_argument("--jobs", type=int)
     p.add_argument("--no-build", dest="build", action="store_false", default=True)
     p.add_argument("--no-viz", dest="viz", action="store_false", default=True)
     p.add_argument("--no-skill", dest="skill", action="store_false", default=True)
-    p.add_argument("--no-claude-md", dest="claude_md", action="store_false", default=True)
+    p.add_argument("--claude-md", dest="claude_md", action="store_true", default=False,
+                   help="also write the agent note into the project's CLAUDE.md "
+                        "(once per repo; commit it so everyone gets it)")
+    p.add_argument("--no-claude-md", dest="claude_md", action="store_false", help=argparse.SUPPRESS)
     p.add_argument("--claude-md-path", dest="claude_md_path",
-                   help="write the agent note here instead of <project>/CLAUDE.md")
+                   help="with --claude-md, write the note here instead of <project>/CLAUDE.md")
     p.set_defaults(fn=cmd_init, no_stale_check=True)
 
     p = sub.add_parser("deinit", help="remove what init installed in a project")
@@ -1995,6 +2000,8 @@ def build_parser():
                    help="also delete the graph, history db, explorer, digests and the default vault export")
     p.add_argument("--force", action="store_true",
                    help="delete the project skill even when it has a Project notes section")
+    p.add_argument("--claude-md", action="store_true",
+                   help="also strip the agent note from the project's CLAUDE.md")
     p.set_defaults(fn=cmd_deinit, no_stale_check=True)
 
     p = sub.add_parser("config", help="show or change settings for this project")

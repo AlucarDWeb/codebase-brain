@@ -13,7 +13,7 @@ the CLI stayed `idxg`.
 | `src/idxstore.py` | 112 | ctypes bindings for `libIndexStore.dylib`: units, records, occurrences, symbol relations |
 | `src/build.py` | 492 | parallel extractor, SQLite writer, atomic swap, registry update |
 | `src/project.py` | 395 | project registry, store detection, layered config, staleness |
-| `src/idxg.py` | 2063 | the CLI: every subcommand, plus the shared query helpers |
+| `src/idxg.py` | 2070 | the CLI: every subcommand, plus the shared query helpers |
 | `src/viz.py` | 1161 | HTML explorer: data slicing and the whole page as one Python string |
 | `src/deadcode.py` | 98 | dead-code candidate query and its text cross-check |
 | `src/history.py` | 1513 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; per-commit narration, weekly digest, timeline, vault export |
@@ -175,5 +175,7 @@ found.
 - `README.md` is the user-facing surface, `skill/codebase-brain/SKILL.md` is what
   an agent reads. Both need updating when a command or a default changes, and so do the
   MCP tool descriptions in `mcp_server.py` and the project skill text in `idxg.py`.
-- `idxg init` writes a project skill and a CLAUDE.md block into the target repo.
+- `idxg init` writes a project skill into the target repo, and a CLAUDE.md block only with
+  `--claude-md`: the block is meant to be committed once and shared, so a teammate's init or
+  deinit must not rewrite or strip it.
   Everything below `## Project notes` in that skill is the user's and survives re-init.

@@ -40,7 +40,7 @@ DEFAULT_CONFIG = {
     "autoindex": True,                # keep the background refresh agent installed (global only)
     "poll_minutes": 15,               # autoindex agent interval (global only)
     "jobs": max(2, (os.cpu_count() or 4) - 2),
-    "claude_md_path": "",             # where init writes the agent note (blank = CLAUDE.md)
+    "claude_md_path": "",             # where init --claude-md writes the agent note (blank = CLAUDE.md)
     "history_on_build": True,         # refresh commit history and docs after every graph build
     "history_branch": "",             # branch whose log is the project's history (blank = main/master)
     "history_first_parent": True,     # one commit per merge on that branch, not every branch commit
@@ -63,7 +63,7 @@ CONFIG_HELP = {
     "autoindex": "keep the background refresh agent installed; install.sh honours it",
     "poll_minutes": "autoindex agent interval, global only",
     "jobs": "parallel extractor workers",
-    "claude_md_path": "where init writes the agent note (blank = <project>/CLAUDE.md)",
+    "claude_md_path": "where init --claude-md writes the agent note (blank = <project>/CLAUDE.md)",
     "history_on_build": "refresh commit history and repo docs after every graph build",
     "history_branch": "branch whose log is the project's history (blank = main, then master)",
     "history_first_parent": "count one commit per merge on the history branch",
