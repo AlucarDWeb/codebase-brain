@@ -100,6 +100,20 @@ footer{color:var(--dim);font-size:11px;padding:14px 18px;border-top:1px solid va
 .era.on{border-left-color:var(--accent)}
 .era h3{font-size:13px;margin:0 0 6px;font-family:var(--mono);color:var(--accent);cursor:pointer}
 .era .facts{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-bottom:6px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;min-height:22px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:2px 4px 2px 8px;border-radius:10px;
+  background:var(--panel2);border:1px solid var(--line)}
+.chip.m{border-color:var(--pink)}
+.chip b{font-weight:500;color:var(--fg)}
+.chip button{background:none;border:none;color:var(--dim);cursor:pointer;font-family:var(--mono);font-size:12px;padding:0 4px}
+.chip button:hover{color:var(--pink)}
+.gkinds{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin:6px 0}
+.gkinds label,.gkinds span{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+.gkinds i{width:14px;height:3px;display:inline-block;border-radius:2px}
+#gsvg path.e{fill:none}
+#gsvg g.far{opacity:.65}
+#gsvg g.dim{opacity:.12}
+#gsvg path.dim{opacity:.08}
 .chart{width:100%;height:160px;background:var(--panel);border:1px solid var(--line);border-radius:6px}
 .chart rect{fill:var(--accent2);fill-opacity:.7}
 .chart rect.hi{fill:var(--accent);fill-opacity:1}
@@ -336,6 +350,7 @@ BODY = """
   <button data-tab="modules">modules</button>
   <button data-tab="symbols">symbols</button>
   <button data-tab="dead">dead code</button>
+  <button data-tab="graph">graph</button>
   <button data-tab="history">history</button>
   <button data-tab="docs">docs</button>
 </nav>
@@ -344,6 +359,7 @@ BODY = """
   <section id="modules" hidden></section>
   <section id="symbols" hidden></section>
   <section id="dead" hidden></section>
+  <section id="graph" hidden></section>
   <section id="history" hidden></section>
   <section id="docs" hidden></section>
 </main>
@@ -964,7 +980,7 @@ function selectModule(i, fromTrail) {
   const b = el('a', null, `browse ${name} symbols`);
   b.style.color = 'var(--accent2)'; b.style.cursor = 'pointer';
   b.onclick = () => { showTab('symbols'); setModule(name); };
-  jump.style.marginTop = '10px'; jump.append(b);
+  jump.style.marginTop = '10px'; jump.append(b, document.createTextNode('  '), graphLink(`m:${name}`));
   g.append(jump);
   const ask = askBox(modulePrompts(name, ins, outs));
   ask.style.marginTop = '0'; ask.style.position = 'sticky'; ask.style.top = '12px';
@@ -1215,6 +1231,7 @@ function select(i) {
   d.append(kv);
   d.append(tree('callers (inbound)', inn.get(i) || []));
   d.append(tree('callees (outbound)', out.get(i) || []));
+  const gl = el('div'); gl.style.margin = '10px 0'; gl.append(graphLink(`s:${i}`)); d.append(gl);
   d.append(neighborhood(i));
   d.append(askBox(symbolPrompts(n, inn.get(i) || [], out.get(i) || [])));
 }
@@ -1732,16 +1749,588 @@ function banner() {
 }
 banner();
 
+/* ---------- graph: picked modules and symbols with what connects them ---------- */
+const graphSel = [];
+const graphOpts = { hops: 1, cap: 12, fit: true, between: false, kinds: new Set(['CALLS', 'REFERENCES', 'INHERITS', 'OVERRIDES', 'EXTENDS']) };
+const EDGE_COLORS = { CALLS: '#3987e5', REFERENCES: '#8a96a8', CONTAINS: '#9085e9', INHERITS: '#d95926',
+  OVERRIDES: '#d55181', EXTENDS: '#c98500', ACCESSOR_OF: '#4caf50', RECEIVED_BY: '#199e70',
+  SPECIALIZES: '#e66767', IB_TYPE_OF: '#1fb5a3' };
+const edgeColor = k => EDGE_COLORS[k] || '#8a96a8';
+// Layout cost grows with the square of the node count, so the graph stops growing here.
+const GRAPH_MAX = 160;
+let graphFocus = null;
+const gIsMod = key => key.startsWith('m:');
+const gName = key => gIsMod(key) ? key.slice(2) : D.nodes[+key.slice(2)].n;
+const gLayer = m => (D.mod_layers || {})[m] || 'Other';
+let gLayers = null;
+const gColor = key => {
+  if (!gLayers) gLayers = [...new Set(D.modules.map(([m]) => gLayer(m)))].sort();
+  const m = gIsMod(key) ? key.slice(2) : D.nodes[+key.slice(2)].m;
+  return m ? LAYER_COLORS[gLayers.indexOf(gLayer(m)) % LAYER_COLORS.length] : 'var(--dim)';
+};
+
+function graphLink(key) {
+  const a = el('a', null, 'add to graph');
+  a.style.color = 'var(--accent2)'; a.style.cursor = 'pointer';
+  a.onclick = () => addToGraph(key);
+  return a;
+}
+function addToGraph(key) {
+  if (!graphSel.includes(key)) graphSel.push(key);
+  graphFocus = key;
+  showTab('graph');
+}
+function toggleGraphPick(key) {
+  const at = graphSel.indexOf(key);
+  if (at >= 0) graphSel.splice(at, 1); else graphSel.push(key);
+  drawGraph();
+}
+
+function graphNeighbours(key) {
+  const kinds = graphOpts.kinds, w = new Map();
+  if (gIsMod(key)) {
+    // Module pairs only record calls, so the other kinds have nothing to add at this level.
+    if (!kinds.has('CALLS')) return [];
+    const m = key.slice(2);
+    for (const [a, b, n] of D.mod_edges) {
+      if (a === m) w.set('m:' + b, (w.get('m:' + b) || 0) + n);
+      if (b === m) w.set('m:' + a, (w.get('m:' + a) || 0) + n);
+    }
+  } else {
+    const i = +key.slice(2);
+    for (const list of [out.get(i) || [], inn.get(i) || []])
+      for (const [o, k, , , n] of list)
+        if (o !== i && kinds.has(k)) w.set('s:' + o, (w.get('s:' + o) || 0) + (n || 1));
+  }
+  return [...w.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]);
+}
+
+function graphCollect() {
+  const hop = new Map();
+  for (const k of graphSel) hop.set(k, 0);
+  let frontier = [...graphSel], capped = false;
+  for (let h = 1; h <= graphOpts.hops; h++) {
+    const next = [];
+    for (const k of frontier) {
+      for (const nb of graphNeighbours(k).slice(0, h === 1 ? graphOpts.cap : Math.ceil(graphOpts.cap / 3))) {
+        if (hop.has(nb)) continue;
+        if (hop.size >= GRAPH_MAX) { capped = true; break; }
+        hop.set(nb, h); next.push(nb);
+      }
+    }
+    frontier = next;
+  }
+  const syms = new Set(), mods = new Set();
+  for (const k of hop.keys()) if (gIsMod(k)) mods.add(k.slice(2)); else syms.add(+k.slice(2));
+  const links = new Map();
+  const add = (a, b, kind, n, site) => {
+    const id = a + '|' + b + '|' + kind;
+    const l = links.get(id);
+    if (l) { l.n += n; return; }
+    links.set(id, { a, b, kind, n, site: site || '' });
+  };
+  const kinds = graphOpts.kinds;
+  // A symbol links to a drawn module when it touches any symbol of that module the graph
+  // does not draw itself; its own module is the box it sits in.
+  for (const i of syms) {
+    const own = D.nodes[i].m;
+    for (const [o, k, f, l, n] of out.get(i) || []) {
+      if (!kinds.has(k) || o === i) continue;
+      const site = f ? `${f}:${l}` : '';
+      if (syms.has(o)) add('s:' + i, 's:' + o, k, n || 1, site);
+      else { const m = D.nodes[o].m; if (m && m !== own && mods.has(m)) add('s:' + i, 'm:' + m, k, n || 1, site); }
+    }
+    for (const [o, k, f, l, n] of inn.get(i) || []) {
+      if (!kinds.has(k) || o === i || syms.has(o)) continue;
+      const m = D.nodes[o].m;
+      if (m && m !== own && mods.has(m)) add('m:' + m, 's:' + i, k, n || 1, f ? `${f}:${l}` : '');
+    }
+  }
+  if (kinds.has('CALLS'))
+    for (const [a, b, n] of D.mod_edges) if (mods.has(a) && mods.has(b)) add('m:' + a, 'm:' + b, 'CALLS', n, '');
+  return { hop, links: [...links.values()], capped };
+}
+
+function graphTab() {
+  const s = document.getElementById('graph');
+  if (!s.dataset.init) {
+    s.dataset.init = '1';
+    const card = el('div', 'card');
+    card.append(el('h2', null, 'connections between the modules and symbols you pick'));
+    card.append(el('div', 'loc', `symbols come from the ${fmt(D.slice_size)} most connected ones in this page, and each carries only its strongest edges; module links count calls only. For anything outside that, ask the agent (trace_path, find_references).`));
+    const filters = el('div', 'filters'); filters.style.marginTop = '10px';
+    const q = el('input'); q.type = 'text'; q.id = 'gq';
+    q.placeholder = 'add a module or symbol: type part of its name (Module.symbol narrows), Enter picks the first';
+    q.style.flex = '3 1 320px';
+    const hops = el('select'); hops.id = 'ghops';
+    for (const [v, label] of [[0, 'only what I picked'], [1, 'plus direct neighbours'], [2, 'plus neighbours of neighbours']]) {
+      const o = el('option', null, label); o.value = String(v); hops.append(o);
+    }
+    hops.value = String(graphOpts.hops);
+    hops.oninput = () => { graphOpts.hops = +hops.value; drawGraph(); };
+    const cap = el('select'); cap.id = 'gcap';
+    for (const v of [6, 12, 25]) { const o = el('option', null, `up to ${v} neighbours each`); o.value = String(v); cap.append(o); }
+    cap.value = String(graphOpts.cap);
+    cap.oninput = () => { graphOpts.cap = +cap.value; drawGraph(); };
+    filters.append(q, hops, cap);
+    card.append(filters);
+    const res = el('div', 'rows'); res.id = 'gres'; res.style.maxHeight = '260px'; card.append(res);
+    const chips = el('div', 'chips'); chips.id = 'gchips'; card.append(chips);
+    const kinds = el('div', 'gkinds');
+    for (const k of Object.keys(D.edge_kinds || {})) {
+      const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = graphOpts.kinds.has(k);
+      cb.onchange = () => { if (cb.checked) graphOpts.kinds.add(k); else graphOpts.kinds.delete(k); drawGraph(); };
+      const sw = el('i'); sw.style.background = edgeColor(k);
+      lab.append(cb, sw, document.createTextNode(k)); kinds.append(lab);
+    }
+    card.append(kinds);
+    const count = el('div', 'loc'); count.id = 'gcount'; count.style.marginBottom = '6px'; card.append(count);
+    const stage = el('div'); stage.id = 'gstage'; card.append(stage);
+    s.append(card);
+    const info = el('div', 'card'); info.id = 'ginfo'; info.style.marginTop = '14px';
+    const edges = el('div', 'card'); edges.id = 'gedges'; edges.style.marginTop = '14px';
+    s.append(info, edges);
+    q.addEventListener('input', () => graphSearch(q.value));
+    q.addEventListener('keydown', ev => {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      const first = graphSearch(q.value)[0];
+      if (first) pickFromSearch(first);
+    });
+  }
+  drawGraph();
+}
+
+function pickFromSearch(key) {
+  if (!graphSel.includes(key)) graphSel.push(key);
+  graphFocus = key;
+  const q = document.getElementById('gq'); q.value = '';
+  graphSearch('');
+  drawGraph();
+}
+function graphSearch(text) {
+  const box = document.getElementById('gres'); box.innerHTML = '';
+  const q = text.trim().toLowerCase();
+  if (!q) return [];
+  const dot = q.lastIndexOf('.');
+  const mq = dot > 0 ? q.slice(0, dot) : '', nq = dot > 0 ? q.slice(dot + 1) : q;
+  const mods = mq ? [] : D.modules.filter(([m]) => m.toLowerCase().includes(q))
+    .sort((a, b) => b[1] - a[1]).slice(0, 8).map(([m]) => 'm:' + m);
+  const syms = [];
+  for (let i = 0; i < D.nodes.length; i++) {
+    const n = D.nodes[i];
+    if (!n.n.toLowerCase().includes(nq)) continue;
+    if (mq && !(n.m || '').toLowerCase().includes(mq)) continue;
+    syms.push(i);
+  }
+  syms.sort((a, b) => (D.nodes[b].i + D.nodes[b].o) - (D.nodes[a].i + D.nodes[a].o));
+  const keys = mods.concat(syms.slice(0, 30).map(i => 's:' + i));
+  for (const key of keys) {
+    const r = el('div', 'row');
+    if (gIsMod(key)) {
+      const m = key.slice(2);
+      r.append(el('span', 'nm', m), el('span', 'badge', 'module'), el('span', 'meta', gLayer(m)));
+    } else {
+      const n = D.nodes[+key.slice(2)];
+      r.append(el('span', 'nm', n.n), el('span', 'badge', n.k),
+               el('span', 'meta', `${n.m || '?'}  ${n.f ? n.f.split('/').pop() + ':' + n.l : 'external'}`));
+    }
+    if (graphSel.includes(key)) r.classList.add('sel');
+    r.onclick = () => pickFromSearch(key);
+    box.append(r);
+  }
+  if (!keys.length) box.append(el('div', 'empty', 'nothing in this page matches'));
+  else if (syms.length > 30) box.append(el('div', 'loc', `${fmt(syms.length - 30)} more symbols match; type more of the name`));
+  return keys;
+}
+
+function drawGraph() {
+  const chips = document.getElementById('gchips'); chips.innerHTML = '';
+  for (const k of graphSel) {
+    const c = el('span', gIsMod(k) ? 'chip m' : 'chip');
+    c.append(el('b', null, gName(k)), el('span', 'loc', gIsMod(k) ? 'module' : D.nodes[+k.slice(2)].k));
+    const x = el('button', null, '×'); x.title = 'remove';
+    x.onclick = () => { if (graphFocus === k) graphFocus = null; toggleGraphPick(k); };
+    c.append(x); chips.append(c);
+  }
+  if (graphSel.length > 1) {
+    const clr = el('a', 'loc', 'clear all'); clr.style.cursor = 'pointer';
+    clr.onclick = () => { graphSel.length = 0; graphFocus = null; drawGraph(); };
+    chips.append(clr);
+  }
+  const stage = document.getElementById('gstage'); stage.innerHTML = '';
+  const count = document.getElementById('gcount');
+  if (!graphSel.length) {
+    count.textContent = '';
+    stage.append(el('div', 'empty', 'nothing picked yet: search above, or use "add to graph" in the modules and symbols tabs'));
+    graphFocus = null; graphInfo(); graphEdges([]);
+    return;
+  }
+  const { hop, links: all, capped } = graphCollect();
+  const keys = [...hop.keys()];
+  // Links between two neighbours at the same distance are the ones that turn the view into
+  // a mesh, so they are drawn only on request; the table below always lists them.
+  const links = graphOpts.between ? all : all.filter(l => { const a = hop.get(l.a), b = hop.get(l.b); return a !== b || a === 0; });
+  const size = new Map(D.modules.map(([m, n]) => [m, n]));
+  const L = graphLayout(keys, links, hop);
+  const { CW, CH } = L;
+  const NS = 'http://www.w3.org/2000/svg';
+  const mk = (tag, attrs, style) => {
+    const e = document.createElementNS(NS, tag);
+    for (const a in attrs || {}) e.setAttribute(a, attrs[a]);
+    Object.assign(e.style, style || {});
+    return e;
+  };
+  const trunc = (t, n) => t.length > n ? t.slice(0, n - 1) + '…' : t;
+  const svg = mk('svg', { id: 'gsvg', viewBox: `0 0 ${L.W} ${L.H}` });
+  svg.id = 'gsvg';
+  const applyFit = () => {
+    if (graphOpts.fit) Object.assign(svg.style, { width: '100%', maxWidth: L.W + 'px', height: 'auto', display: 'block', margin: '0 auto' });
+    else Object.assign(svg.style, { width: L.W + 'px', maxWidth: 'none', height: L.H + 'px', display: 'block', margin: '0' });
+  };
+  applyFit();
+  const defs = mk('defs');
+  for (const k of new Set(links.map(l => l.kind))) {
+    const m = mk('marker', { id: 'garrow-' + k, viewBox: '0 0 10 10', refX: '9', refY: '5', orient: 'auto',
+      markerUnits: 'userSpaceOnUse', markerWidth: '8', markerHeight: '8' });
+    m.append(mk('path', { d: 'M0,1L10,5L0,9z' }, { fill: edgeColor(k) }));
+    defs.append(m);
+  }
+  svg.append(defs);
+
+  for (const g of L.groups) {
+    const color = gColor(g.members[0]);
+    svg.append(mk('rect', { x: g.x, y: g.y, width: g.w, height: g.h, rx: 10 },
+      { fill: color, fillOpacity: '.05', stroke: color, strokeOpacity: '.7', strokeDasharray: '5 4', strokeWidth: '1' }));
+    const t = mk('text', { x: g.x + 12, y: g.y + 17 }, { fill: color, fontSize: '11px', fontWeight: '600' });
+    t.textContent = trunc(g.title, Math.floor((g.w - 24) / 6.8));
+    svg.append(t);
+  }
+
+  const linkEls = [];
+  for (const r of L.routes) {
+    const l = r.l;
+    const path = mk('path', { class: 'e', d: r.d, 'marker-end': `url(#garrow-${l.kind})` }, {
+      stroke: edgeColor(l.kind), strokeWidth: String(1.2 + Math.min(2.3, Math.log10(1 + l.n) * 0.8)), strokeOpacity: '.85',
+      strokeDasharray: l.kind === 'REFERENCES' ? '4 3' : '' });
+    const tt = mk('title');
+    tt.textContent = `${gName(l.a)} to ${gName(l.b)}: ` + l.parts.map(x => `${x.kind} ${fmt(x.n)}`).join(', ') + (l.site ? `, e.g. ${l.site}` : '');
+    path.append(tt); svg.append(path);
+    linkEls.push({ l, path });
+  }
+
+  const nodeEls = new Map();
+  keys.forEach((key, i) => {
+    const p = L.pos[i], color = gColor(key), picked = hop.get(key) === 0;
+    const g = mk('g', { class: hop.get(key) === 2 ? 'far' : '' }, { cursor: 'pointer' });
+    g.append(mk('rect', { x: p.x, y: p.y, width: CW, height: CH, rx: 7 },
+      { fill: 'var(--panel2)', stroke: picked ? 'var(--warn)' : color, strokeWidth: picked ? '2' : '1.2' }));
+    g.append(mk('rect', { x: p.x + 1, y: p.y + 7, width: 3, height: CH - 14, rx: 1.5 }, { fill: color }));
+    const title = mk('text', { x: p.x + 12, y: p.y + 18 }, { fill: 'var(--fg)', fontSize: '11.5px', fontWeight: picked ? '600' : '500' });
+    title.textContent = trunc(gName(key), 28);
+    const sub = mk('text', { x: p.x + 12, y: p.y + 32 }, { fill: 'var(--dim)', fontSize: '9.5px' });
+    const tt = mk('title');
+    if (gIsMod(key)) {
+      const m = key.slice(2);
+      sub.textContent = `module · ${fmt(size.get(m))} symbols`;
+      tt.textContent = `${m} (module, ${gLayer(m)}, ${fmt(size.get(m))} symbols)`;
+    } else {
+      const n = D.nodes[+key.slice(2)];
+      sub.textContent = trunc(`${n.k}${n.f ? ' · ' + n.f.split('/').pop() + ':' + n.l : ''}`, 36);
+      tt.textContent = `${n.n} (${n.k} in ${n.m || '?'}) ${n.f ? n.f + ':' + n.l : 'external'}`;
+    }
+    g.append(title, sub, tt);
+    g.onclick = ev => {
+      ev.stopPropagation();
+      if (ev.shiftKey) { toggleGraphPick(key); return; }
+      graphFocus = key; graphInfo(); highlight(key);
+    };
+    g.onmouseenter = () => highlight(key);
+    g.onmouseleave = () => highlight(graphFocus);
+    svg.append(g);
+    nodeEls.set(key, g);
+  });
+  function highlight(key) {
+    if (!key || !nodeEls.has(key)) {
+      for (const g of nodeEls.values()) g.classList.remove('dim');
+      for (const { path } of linkEls) path.classList.remove('dim');
+      return;
+    }
+    const near = new Set([key]);
+    for (const { l, path } of linkEls) {
+      const on = l.a === key || l.b === key;
+      path.classList.toggle('dim', !on);
+      if (on) { near.add(l.a); near.add(l.b); }
+    }
+    for (const [k, g] of nodeEls) g.classList.toggle('dim', !near.has(k));
+  }
+  svg.onclick = () => { graphFocus = null; graphInfo(); highlight(null); };
+  const bar = el('div', 'loc'); bar.style.display = 'flex'; bar.style.gap = '10px'; bar.style.alignItems = 'center'; bar.style.marginBottom = '6px';
+  const seg = el('div', 'seg');
+  for (const [v, label] of [[true, 'fit'], [false, 'actual size']]) {
+    const b = el('button', graphOpts.fit === v ? 'on' : '', label);
+    b.onclick = () => { graphOpts.fit = v; for (const x of seg.children) x.classList.toggle('on', x === b); applyFit(); };
+    seg.append(b);
+  }
+  const btw = el('label'); btw.style.display = 'inline-flex'; btw.style.gap = '5px'; btw.style.cursor = 'pointer';
+  const cb = el('input'); cb.type = 'checkbox'; cb.checked = !!graphOpts.between;
+  cb.onchange = () => { graphOpts.between = cb.checked; drawGraph(); };
+  btw.append(cb, document.createTextNode('links between neighbours'));
+  bar.append(seg, btw, document.createTextNode('what uses your picks on the left, what they use on the right; boxes group symbols by module and modules by layer'));
+  const scroller = el('div'); scroller.style.overflow = 'auto'; scroller.style.maxHeight = '82vh';
+  scroller.append(svg);
+  stage.append(bar, scroller);
+  if (graphFocus && !hop.has(graphFocus)) graphFocus = null;
+  highlight(graphFocus);
+
+  count.textContent = `${graphSel.length} picked, ${keys.length} nodes, ${links.length} connections drawn` +
+    (all.length > links.length ? ` (${all.length - links.length} between neighbours hidden)` : '') +
+    (capped ? `; stopped at ${GRAPH_MAX} nodes, so pick fewer or show fewer neighbours` : '') +
+    (!links.length ? '; none recorded between these in this page, with the kinds ticked above' : '') +
+    '. Click a node for details, shift-click to add or remove it.';
+  graphInfo();
+  graphEdges(all);
+}
+
+// The picks take the middle columns, what uses them sits to the left and what they use to
+// the right; cards stack in dashed boxes per module or layer, each column ordered by where
+// its neighbours sit.
+function graphLayout(keys, links, hop) {
+  const CW = 216, CH = 42, VG = 8, GP = 10, HEAD = 26, GAP = 130, GGAP = 16, PAD = 24;
+  const n = keys.length, ix = new Map(keys.map((k, i) => [k, i]));
+  const adj = keys.map(() => []);
+  for (const l of links) { const a = ix.get(l.a), b = ix.get(l.b); if (a !== b) adj[a].push(b); }
+  const isPick = keys.map(k => hop.get(k) === 0);
+  // Picks are ordered among themselves by what uses what: a depth-first walk drops the edge
+  // that closes each cycle, then each pick takes the longest path to it.
+  const st = new Array(n).fill(0), pout = keys.map(() => []), pin = keys.map(() => []);
+  const visit = a => {
+    st[a] = 1;
+    for (const b of adj[a]) {
+      if (!isPick[b] || st[b] === 1) continue;
+      if (!pout[a].includes(b)) { pout[a].push(b); pin[b].push(a); }
+      if (!st[b]) visit(b);
+    }
+    st[a] = 2;
+  };
+  for (let i = 0; i < n; i++) if (isPick[i] && !st[i]) visit(i);
+  const prank = new Array(n).fill(0), indeg = pin.map(x => x.length), q = [];
+  for (let i = 0; i < n; i++) if (isPick[i] && !indeg[i]) q.push(i);
+  while (q.length) {
+    const a = q.shift();
+    for (const b of pout[a]) { prank[b] = Math.max(prank[b], prank[a] + 1); if (--indeg[b] === 0) q.push(b); }
+  }
+  // With neighbours drawn the picks share one column, so every caller reaches its pick in one
+  // hop; spreading them by rank only pays when the picks are all there is.
+  const spread = graphOpts.hops === 0;
+  const P = spread ? Math.max(0, ...keys.map((k, i) => isPick[i] ? prank[i] : 0)) + 1 : 1;
+  // Everything else goes left when it mostly uses the picks and right when the picks mostly
+  // use it; a second-ring node follows the first-ring node it hangs from, one column further out.
+  const w = keys.map(() => [0, 0]), best = keys.map(() => [-1, 0]);
+  for (const l of links) {
+    const a = ix.get(l.a), b = ix.get(l.b);
+    if (isPick[b] && !isPick[a]) w[a][0] += l.n || 1;
+    if (isPick[a] && !isPick[b]) w[b][1] += l.n || 1;
+    for (const [x, y] of [[a, b], [b, a]])
+      if (hop.get(keys[x]) === 2 && hop.get(keys[y]) === 1 && (l.n || 1) > best[x][1]) best[x] = [y, l.n || 1];
+  }
+  const side = keys.map((k, i) => isPick[i] ? 0 : w[i][0] > w[i][1] ? -1 : 1);
+  for (let i = 0; i < n; i++) if (hop.get(keys[i]) === 2) side[i] = best[i][0] >= 0 ? side[best[i][0]] : 1;
+  const rawCol = keys.map((k, i) => {
+    const h = hop.get(k);
+    if (!h) return 2 + (spread ? prank[i] : 0);
+    return side[i] < 0 ? 2 - h : 1 + P + h;
+  });
+  const used = [...new Set(rawCol)].sort((a, b) => a - b);
+  const col = rawCol.map(c => used.indexOf(c));
+  const ncol = used.length;
+  const groupOf = i => {
+    const k = keys[i];
+    return gIsMod(k) ? 'layer:' + gLayer(k.slice(2)) : 'mod:' + (D.nodes[+k.slice(2)].m || '?');
+  };
+  const titleOf = gk => gk.startsWith('layer:') ? gk.slice(6) + ' layer' : gk === 'mod:?' ? 'no module (SDK or external)' : gk.slice(4);
+  const nb = keys.map(() => []);
+  for (const l of links) { const a = ix.get(l.a), b = ix.get(l.b); if (a !== b) { nb[a].push(b); nb[b].push(a); } }
+  const byCol = Array.from({ length: ncol }, () => new Map());
+  for (let i = 0; i < n; i++) {
+    const m = byCol[col[i]], gk = groupOf(i);
+    if (!m.has(gk)) m.set(gk, []);
+    m.get(gk).push(i);
+  }
+  const subOf = () => 1;
+  const colW = byCol.map(m => Math.max(CW + 2 * GP, ...[...m.values()].map(mem => subOf(mem.length) * CW + (subOf(mem.length) - 1) * 10 + 2 * GP)));
+  const colX = []; let x = PAD;
+  for (let c = 0; c < ncol; c++) { colX.push(x); x += colW[c] + GAP; }
+  const W = x - GAP + PAD;
+  let y = new Array(n).fill(null), groups = [];
+  const place = prev => {
+    const ny = new Array(n).fill(null); groups = [];
+    for (let c = 0; c < ncol; c++) {
+      const bary = i => {
+        const ys = nb[i].map(j => (ny[j] !== null ? ny[j] : prev[j])).filter(v => v !== null);
+        return ys.length ? ys.reduce((s, v) => s + v, 0) / ys.length : (hop.get(keys[i]) === 0 ? -1e6 : 1e6);
+      };
+      const glist = [...byCol[c].entries()].map(([gk, mem]) => {
+        const bs = new Map(mem.map(i => [i, bary(i)]));
+        mem.sort((a, b) => bs.get(a) - bs.get(b));
+        const vals = mem.map(i => bs.get(i)).filter(v => Math.abs(v) < 1e6);
+        return { gk, mem, b: vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : (mem.some(i => hop.get(keys[i]) === 0) ? -1e6 : 1e6) };
+      }).sort((a, b) => a.b - b.b);
+      let cy = PAD;
+      for (const g of glist) {
+        const sub = subOf(g.mem.length), rows = Math.ceil(g.mem.length / sub);
+        const h = HEAD + rows * (CH + VG) - VG + GP;
+        const top = Math.abs(g.b) < 1e6 ? Math.max(cy, g.b - h / 2) : cy;
+        const w = sub * CW + (sub - 1) * 10 + 2 * GP;
+        const grp = { title: titleOf(g.gk), members: g.mem.map(i => keys[i]), x: colX[c] + (colW[c] - w) / 2, y: top, w, h, idx: g.mem };
+        g.mem.forEach((i, k) => {
+          const r = k % rows, s = Math.floor(k / rows);
+          ny[i] = top + HEAD + r * (CH + VG) + CH / 2;
+          grp[i] = [grp.x + GP + s * (CW + 10), top + HEAD + r * (CH + VG)];
+        });
+        groups.push(grp);
+        cy = top + h + GGAP;
+      }
+    }
+    return ny;
+  };
+  y = place(y);
+  y = place(y);
+  const pos = new Array(n);
+  let minY = Infinity, maxY = 0;
+  for (const g of groups) { minY = Math.min(minY, g.y); maxY = Math.max(maxY, g.y + g.h); }
+  const shift = PAD - (isFinite(minY) ? minY : PAD);
+  for (const g of groups) {
+    g.y += shift;
+    for (const i of g.idx) pos[i] = { x: g[i][0], y: g[i][1] + shift };
+  }
+  const H = maxY + shift + PAD;
+
+  // Ports spread the edges meeting one side of a card over its height, ordered by the
+  // other end, and lanes spread the vertical runs over the gap between two columns.
+  const routes = [], ports = new Map(), lanes = new Map();
+  const port = (i, side, r, other) => { const k = i + side; if (!ports.has(k)) ports.set(k, []); ports.get(k).push({ r, other }); };
+  const lane = (g, r, key) => { if (!lanes.has(g)) lanes.set(g, []); lanes.get(g).push({ r, key }); };
+  const RANK = ['CALLS', 'INHERITS', 'OVERRIDES', 'EXTENDS', 'SPECIALIZES', 'CONTAINS', 'ACCESSOR_OF', 'RECEIVED_BY', 'IB_TYPE_OF', 'REFERENCES'];
+  const merged = new Map();
+  for (const l of links) {
+    const id = l.a + '|' + l.b, m = merged.get(id);
+    if (!m) { merged.set(id, { a: l.a, b: l.b, kind: l.kind, kinds: [l.kind], n: l.n, site: l.site, parts: [l] }); continue; }
+    m.kinds.push(l.kind); m.parts.push(l); m.n += l.n;
+    const rk = k => { const r = RANK.indexOf(k); return r < 0 ? RANK.length : r; };
+    if (rk(l.kind) < rk(m.kind)) m.kind = l.kind;
+  }
+  for (const l of merged.values()) {
+    const a = ix.get(l.a), b = ix.get(l.b);
+    if (a === b) continue;
+    const r = { l, a, b };
+    if (col[b] > col[a]) { r.kind = 'fwd'; port(a, 'R', r, b); port(b, 'L', r, a); lane(col[b] - 1, r, pos[b].y); }
+    else if (col[b] === col[a]) { r.kind = 'same'; port(a, 'R', r, b); port(b, 'R', r, a); lane(col[a], r, pos[b].y); }
+    else { r.kind = 'back'; port(a, 'L', r, b); port(b, 'R', r, a); lane(col[a] - 1, r, pos[b].y); }
+    routes.push(r);
+  }
+  for (const [k, list] of ports) {
+    const i = +k.slice(0, -1), side = k.slice(-1);
+    list.sort((p, q2) => pos[p.other].y - pos[q2.other].y);
+    list.forEach((p, j) => {
+      const yy = pos[i].y + 6 + (j + 1) * (CH - 12) / (list.length + 1);
+      const xx = side === 'R' ? pos[i].x + CW : pos[i].x;
+      if (p.r.a === i && !('y1' in p.r)) { p.r.x1 = xx; p.r.y1 = yy; }
+      else { p.r.x2 = side === 'R' ? xx + 2 : xx - 2; p.r.y2 = yy; }
+    });
+  }
+  for (const [g, list] of lanes) {
+    list.sort((p, q2) => p.key - q2.key);
+    const left = g < 0 ? PAD / 2 : colX[g] + colW[g] + 14, width = g < 0 ? 0 : GAP - 28;
+    list.forEach((p, j) => { p.r.xm = left + (list.length === 1 ? width / 2 : j * width / (list.length - 1)); });
+  }
+  for (const r of routes) {
+    if (r.kind === 'same') r.xm = Math.max(r.xm, pos[r.a].x + CW + 14);
+    r.d = elbow(r.x1, r.y1, r.xm, r.y2, r.x2);
+  }
+  return { W, H, CW, CH, pos, groups, routes };
+}
+function elbow(x1, y1, xm, y2, x2) {
+  const dy = y2 - y1;
+  if (Math.abs(dy) < 1) return `M${x1},${y1} H${x2}`;
+  const r = Math.min(8, Math.abs(dy) / 2, Math.max(1, Math.abs(xm - x1)), Math.max(1, Math.abs(x2 - xm)));
+  const sy = Math.sign(dy), s1 = Math.sign(xm - x1) || 1, s2 = Math.sign(x2 - xm) || 1;
+  return `M${x1},${y1} H${xm - s1 * r} Q${xm},${y1} ${xm},${y1 + sy * r} V${y2 - sy * r} Q${xm},${y2} ${xm + s2 * r},${y2} H${x2}`;
+}
+
+function graphInfo() {
+  const box = document.getElementById('ginfo'); box.innerHTML = '';
+  const k = graphFocus;
+  if (!k) { box.append(el('div', 'empty', 'click a node for its details')); return; }
+  const t = el('h2', null, gName(k)); t.style.color = 'var(--accent)'; t.style.fontSize = '13px'; box.append(t);
+  const kv = el('div', 'kv');
+  let rows;
+  if (gIsMod(k)) {
+    const m = k.slice(2), row = D.modules.find(r => r[0] === m) || [];
+    rows = [['kind', 'module'], ['layer', gLayer(m)], ['symbols', fmt(row[1])]];
+  } else {
+    const n = D.nodes[+k.slice(2)];
+    rows = [['kind', n.k], ['module', n.m || '(none)'], ['file', n.f ? `${n.f}:${n.l}` : 'external'],
+            ['calls', `in ${fmt(n.ci)} / out ${fmt(n.co)}`], ['occurrences', fmt(n.rc)]];
+  }
+  for (const [a, b] of rows) kv.append(el('div', null, a), el('div', null, b));
+  box.append(kv);
+  const acts = el('div');
+  const pick = el('a', null, graphSel.includes(k) ? 'remove from the picks' : 'add to the picks');
+  pick.onclick = () => toggleGraphPick(k);
+  const open = el('a', null, gIsMod(k) ? 'open in modules' : 'open in symbols');
+  open.onclick = () => {
+    if (!gIsMod(k)) { showTab('symbols'); select(+k.slice(2)); return; }
+    showTab('modules');
+    const iso = document.getElementById('modiso');
+    if (iso) { iso.value = k.slice(2); iso.dispatchEvent(new Event('change')); }
+  };
+  for (const a of [pick, open]) { a.style.color = 'var(--accent2)'; a.style.cursor = 'pointer'; a.style.marginRight = '16px'; acts.append(a); }
+  box.append(acts);
+}
+
+function graphEdges(links) {
+  const box = document.getElementById('gedges'); box.innerHTML = '';
+  box.append(el('h2', null, `connections: ${links.length}`));
+  if (!links.length) { box.append(el('div', 'empty', '(none)')); }
+  else {
+    const tb = el('table'), head = el('tr'), body = el('tbody');
+    for (const h of ['from', 'kind', 'to', 'sites', 'e.g.']) head.append(el('th', null, h));
+    const th = el('thead'); th.append(head); tb.append(th);
+    const picked = new Set(graphSel);
+    const sorted = [...links].sort((a, b) =>
+      ((picked.has(b.a) || picked.has(b.b)) - (picked.has(a.a) || picked.has(a.b))) || b.n - a.n);
+    for (const l of sorted.slice(0, 200)) {
+      const tr = el('tr');
+      const kind = el('td', null, l.kind); kind.style.color = edgeColor(l.kind);
+      const site = el('td', 'loc', l.site ? l.site.split('/').pop() : ''); site.title = l.site;
+      tr.append(el('td', null, gName(l.a)), kind, el('td', null, gName(l.b)), numTd(l.n), site);
+      body.append(tr);
+    }
+    tb.append(body); box.append(tb);
+    if (links.length > 200) box.append(el('div', 'loc', `${fmt(links.length - 200)} more not listed`));
+  }
+  if (graphSel.length) {
+    const names = graphSel.map(k => gIsMod(k) ? `module ${gName(k)}` : (D.nodes[+k.slice(2)].m ? `${D.nodes[+k.slice(2)].m}.${gName(k)}` : gName(k)));
+    const kinds = [...graphOpts.kinds].join(',');
+    const prompts = [graphSel.length > 1
+      ? `Explain how ${names.join(', ')} are connected. Use trace_path between each pair with edge kinds ${kinds || 'CALLS'}, and find_references where no path shows up, then describe each link in plain language with its call site. The explorer only holds the most connected symbols, so look for links it does not show.`
+      : `Walk the connections of ${names[0]}: trace_path inbound and outbound with depth 2 and edge kinds ${kinds || 'CALLS'}, grouped by module, and say which callers are tests.`];
+    box.append(askBox(prompts));
+  }
+}
+
 /* ---------- tabs ---------- */
 function showTab(name) {
   for (const b of document.querySelectorAll('nav button')) b.classList.toggle('on', b.dataset.tab === name);
-  for (const id of ['overview', 'modules', 'symbols', 'dead', 'history', 'docs'])
+  for (const id of ['overview', 'modules', 'symbols', 'dead', 'graph', 'history', 'docs'])
     document.getElementById(id).hidden = id !== name;
   if (name === 'modules' && !modState) modulesTab();
   if (name === 'modules' && modState && modState.svg && !modState.svg.isConnected) modulesTab();
   if (name !== 'modules' && orbit) { orbit.stop(); orbit = null; modState = null; }
   if (name === 'symbols') symbolsTab();
   if (name === 'dead') deadTab();
+  if (name === 'graph') graphTab();
   if (name === 'history') historyTab();
   if (name === 'docs') docsTab();
 }

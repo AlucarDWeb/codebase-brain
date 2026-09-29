@@ -14,7 +14,7 @@ the CLI stayed `idxg`.
 | `src/build.py` | 492 | parallel extractor, SQLite writer, atomic swap, registry update |
 | `src/project.py` | 395 | project registry, store detection, layered config, staleness |
 | `src/idxg.py` | 2073 | the CLI: every subcommand, plus the shared query helpers |
-| `src/viz.py` | 1161 | HTML explorer: data slicing and the whole page as one Python string |
+| `src/viz.py` | 2389 | HTML explorer: data slicing and the whole page as one Python string |
 | `src/deadcode.py` | 98 | dead-code candidate query and its text cross-check |
 | `src/history.py` | 1513 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; per-commit narration, weekly digest, timeline, vault export |
 | `src/crash.py` | ~170 | stack trace parsing (Apple, lldb, free text), frame resolution by file:line or name, callers, since-date for a git ref |

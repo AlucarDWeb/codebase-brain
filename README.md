@@ -117,6 +117,12 @@ working directory; pass `db` to query another one.
 The explorer links back to the agent: select a module or a symbol and an "ask the agent"
 box offers ready-made prompts, filled in from what is on screen, with a copy button.
 
+The graph tab draws the modules and symbols you pick as an architecture diagram: what uses
+them on the left, what they use on the right, cards grouped in boxes by module or layer, one
+arrow colour per edge kind, with direct neighbours or two hops out. It only knows what the page holds: the
+most connected symbols (1,500 by default, `--limit` changes it) and each one's strongest
+edges, so a missing link there is not proof of absence.
+
 ## Triage a crash
 
 ```bash
