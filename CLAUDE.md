@@ -85,6 +85,11 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
   subquery without keeping the same row.
 - **The history build must not leave a WAL either.** It opens the history db in DELETE
   journal mode and removes `-wal`/`-shm` on exit for the same reason `build.py` does.
+- **Parse with the oldest Python, not the one on PATH.** The MCP server runs on macOS's
+  `/usr/bin/python3` (3.9), so syntax that only 3.12 accepts, such as an f-string reusing
+  its own quote inside a replacement field, passes a check under Homebrew's Python and then
+  crashes every history tool on import. 0.3.0 shipped that way. Hoist a nested string into a
+  variable instead of nesting three levels of quotes.
 - **git quotes unusual paths.** The log runs with `core.quotepath=false` and `_rename`
   strips residual quotes; without that a directory named `"Modules/...` appeared in
   `components`.
@@ -138,7 +143,7 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
 ## Verifying a change
 
 ```bash
-python3 -c "import ast,pathlib; [ast.parse(pathlib.Path(f).read_text()) for f in __import__('glob').glob('src/*.py')]"
+/usr/bin/python3 -W error -c "import ast,pathlib; [ast.parse(pathlib.Path(f).read_text()) for f in __import__('glob').glob('src/*.py')]"
 cd /path/to/an/indexed/project && idxg-build --jobs 8 && idxg status
 python3 /path/to/repo/bench/bench_mcp.py          # latency and payload per MCP tool
 idxg history build && idxg history timeline --periods 2 && idxg docs search "architecture"
