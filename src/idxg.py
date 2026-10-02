@@ -994,8 +994,24 @@ def cmd_history_digest(a):
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _git(*args):
+    return subprocess.run(["git", "-C", REPO_DIR, *args], capture_output=True, text=True)
+
+
+def release_tags():
+    """Release tags in this checkout, newest first."""
+    tags = [t for t in _git("tag", "-l", "v*").stdout.split() if prj._version_tuple(t)]
+    return sorted(tags, key=prj._version_tuple, reverse=True)
+
+
+def previous_release():
+    """The newest release tag older than the running version, or None."""
+    older = [t for t in release_tags() if prj._version_tuple(t) < prj._version_tuple(VERSION)]
+    return older[0] if older else None
+
+
 def cmd_update(a):
-    """Pull the latest release into the checkout this CLI runs from, then reinstall links."""
+    """Check out a release tag in the checkout this CLI runs from, then reinstall links."""
     tag, url = prj.update_available(VERSION, force=True)
     latest = prj.latest_release(force=False).get("tag") or "unknown"
     print(f"installed: {VERSION}   latest release: {latest}")
@@ -1005,28 +1021,43 @@ def cmd_update(a):
         else:
             print("up to date")
         return
-    if not tag and not a.force:
-        print("up to date; pass --force to pull anyway")
+    target = ("v" + a.to.lstrip("v")) if a.to else (tag or (latest if a.force and latest != "unknown" else None))
+    if not target:
+        print("up to date; pass --force to reinstall the latest release, or --to <version> for another one")
         return
     if not os.path.isdir(os.path.join(REPO_DIR, ".git")):
         raise SystemExit(f"{REPO_DIR} is not a git checkout; update it the way you installed it")
-    dirty = subprocess.run(["git", "-C", REPO_DIR, "status", "--porcelain"], capture_output=True, text=True).stdout
-    if dirty.strip():
+    if _git("status", "--porcelain").stdout.strip():
         raise SystemExit(f"{REPO_DIR} has uncommitted changes; commit or discard them, then run idxg update")
-    branch = subprocess.run(["git", "-C", REPO_DIR, "rev-parse", "--abbrev-ref", "HEAD"],
-                            capture_output=True, text=True).stdout.strip()
-    print(f"pulling {branch} in {REPO_DIR}")
-    r = subprocess.run(["git", "-C", REPO_DIR, "pull", "--ff-only", "--tags"], capture_output=True, text=True)
+    r = _git("fetch", "--quiet", "--tags", "--force", "origin")
     if r.returncode != 0:
-        raise SystemExit(f"git pull failed: {(r.stderr or r.stdout).strip()[:400]}")
-    print((r.stdout or "").strip().splitlines()[-1] if r.stdout.strip() else "pulled")
+        raise SystemExit(f"git fetch failed: {(r.stderr or r.stdout).strip()[:400]}")
+    if target not in release_tags():
+        known = ", ".join(release_tags()[:5]) or "none"
+        raise SystemExit(f"no release {target}; the newest ones are {known}")
+    # A detached checkout of the tag means a later update never depends on the branch state,
+    # and a commit pushed to main without a release never reaches anyone.
+    before = _git("rev-parse", "HEAD").stdout.strip()
+    r = _git("checkout", "--quiet", "--detach", target)
+    if r.returncode != 0:
+        raise SystemExit(f"git checkout {target} failed: {(r.stderr or r.stdout).strip()[:400]}")
+    print(f"checked out {target} in {REPO_DIR}")
+    # Try the new code before relinking anything, and step back when it does not start, because
+    # a broken idxg could not run another update.
+    smoke = os.path.join(REPO_DIR, "tests", "smoke.py")
+    check = [smoke] if os.path.exists(smoke) else [os.path.join(REPO_DIR, "src", "idxg.py"), "--version"]
+    r = subprocess.run([sys.executable, *check], capture_output=True, text=True)
+    if r.returncode != 0:
+        _git("checkout", "--quiet", before)
+        raise SystemExit(f"{target} does not start on {sys.executable}, so the checkout is back where it "
+                         f"was ({VERSION}):\n{(r.stdout + r.stderr).strip()[-600:]}")
+    now = subprocess.run([sys.executable, os.path.join(REPO_DIR, "src", "idxg.py"), "--version"],
+                         capture_output=True, text=True)
     install = os.path.join(REPO_DIR, "install.sh")
     if os.path.exists(install):
         r = subprocess.run(["sh", install], capture_output=True, text=True)
         print(r.stdout.strip().splitlines()[0] if r.stdout.strip() else "install.sh ran")
-    now = subprocess.run([sys.executable, os.path.join(REPO_DIR, "src", "idxg.py"), "--version"],
-                         capture_output=True, text=True).stdout.strip()
-    print(f"now: {now}")
+    print(f"now: {now.stdout.strip()}")
     print("restart Claude Code so the MCP server picks up the new code; graphs and history need no rebuild")
 
 
@@ -2036,9 +2067,10 @@ def build_parser():
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_crash)
 
-    p = sub.add_parser("update", help="pull the latest release and reinstall")
+    p = sub.add_parser("update", help="install the latest release, or another one with --to")
     p.add_argument("--check", action="store_true", help="only report whether a newer release exists")
-    p.add_argument("--force", action="store_true", help="pull even when no newer release is known")
+    p.add_argument("--force", action="store_true", help="reinstall the latest release even when it is installed")
+    p.add_argument("--to", metavar="VERSION", help="install this release instead, e.g. 0.2.16 to go back")
     p.set_defaults(fn=cmd_update, no_stale_check=True)
 
     p = sub.add_parser("open", help="open the HTML explorer for this project")

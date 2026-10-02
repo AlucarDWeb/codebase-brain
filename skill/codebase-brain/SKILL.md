@@ -102,6 +102,11 @@ whether it is running and what it last did; `idxg refresh` rebuilds now.
 
 ## Operational notes and gotchas
 
+- **When a tool fails with a traceback, the tool may be broken, not the query.** The error
+  ends with the installed version and the way back: `idxg update` for a fix, or
+  `idxg update --to <previous version>`, then a Claude Code restart. If the server lists only
+  `index_status` and that tool says codebase-brain failed to start, give the user the `git`
+  command it prints, because `idxg` cannot run in that state.
 - **It is a snapshot of the last compile, not the working tree.** After edits, line
   numbers drift and new symbols are missing until you rebuild. Rebuild rather than trust
   a stale trace.

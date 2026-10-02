@@ -225,6 +225,13 @@ Without it, run `idxg refresh` after builds. Queries warn when the graph has fal
 `idxg update` to install it, then restart Claude Code to load the new MCP server. Graphs and
 history databases need no rebuild.
 
+`idxg update` installs release tags only, never unreleased commits on `main`. Before it
+switches, it checks that the new release starts on your Python. If it doesn't, the update
+stops and you stay on the version you had. If a release you already installed misbehaves, go
+back with `idxg update --to 0.3.1` (any earlier version works) and restart Claude Code. When
+the MCP server itself cannot start, its one remaining tool prints the `git` command that does
+the same thing.
+
 ## Where the index store comes from
 
 `idxg-build` finds and merges every store it recognises:

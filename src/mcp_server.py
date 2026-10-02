@@ -4,9 +4,33 @@ import argparse, io, json, os, sys, traceback
 from contextlib import redirect_stdout
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import idxg
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# A release that cannot import would otherwise make the server vanish without a word; serving
+# one tool that explains the failure lets the agent tell the user how to get back.
+try:
+    import idxg
+    BROKEN = None
+except Exception:
+    idxg, BROKEN = None, traceback.format_exc(limit=2)
 
-SERVER = {"name": "codebase-brain", "version": idxg.VERSION}
+SERVER = {"name": "codebase-brain", "version": idxg.VERSION if idxg else "unknown"}
+if BROKEN:
+    SERVER["degraded"] = True
+
+
+def recovery_hint():
+    if idxg:
+        prev = idxg.previous_release()
+        back = f"`idxg update --to {prev}` goes back to the previous release" if prev else \
+            "`idxg update --to <version>` installs an earlier release"
+        return (f"\n\nThis is codebase-brain {idxg.VERSION}. If the error looks like a bug in the tool "
+                f"rather than in the arguments: `idxg update` installs a fix if one is out, {back}. "
+                f"Restart Claude Code after either. Report it at "
+                f"https://github.com/AlucarDWeb/codebase-brain/issues")
+    return ("\n\nThe installed codebase-brain cannot start on this Python, so `idxg` does not run either. "
+            f"Go back to the previous release with:\n  git -C {REPO_DIR} fetch --tags && "
+            f"git -C {REPO_DIR} checkout --detach $(git -C {REPO_DIR} describe --tags --abbrev=0 HEAD^)\n"
+            "then restart Claude Code. Report it at https://github.com/AlucarDWeb/codebase-brain/issues")
 
 TOOLS = [
     {"name": "index_status",
@@ -343,7 +367,10 @@ def main():
             elif method in ("notifications/initialized", "initialized"):
                 continue
             elif method == "tools/list":
-                send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}})
+                send({"jsonrpc": "2.0", "id": mid, "result": {"tools": [t for t in TOOLS if t["name"] == "index_status"] if BROKEN else TOOLS}})
+            elif method == "tools/call" and BROKEN:
+                send({"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text":
+                      f"codebase-brain failed to start:\n{BROKEN}{recovery_hint()}"}], "isError": True}})
             elif method == "tools/call":
                 text = call(params["name"], params.get("arguments") or {})
                 send({"jsonrpc": "2.0", "id": mid,
@@ -358,7 +385,8 @@ def main():
                 "content": [{"type": "text", "text": f"error: {e}"}], "isError": True}})
         except Exception:
             send({"jsonrpc": "2.0", "id": mid, "result": {
-                "content": [{"type": "text", "text": traceback.format_exc(limit=3)}], "isError": True}})
+                "content": [{"type": "text", "text": traceback.format_exc(limit=3) + recovery_hint()}],
+                "isError": True}})
 
 
 if __name__ == "__main__":

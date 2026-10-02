@@ -3,7 +3,7 @@
 A queryable code graph for Swift and Objective-C, built from the index store the
 compiler already writes, plus the main branch's commit history (with PR descriptions) and
 the repo's own docs. Python 3.9+, macOS, standard library only. No third-party packages,
-no build step, no tests directory yet. Renamed from `ios-codebase-indexer` on 2026-09-09;
+no build step, and one start-up check (`tests/smoke.py`) instead of a test suite. Renamed from `ios-codebase-indexer` on 2026-09-09;
 the CLI stayed `idxg`.
 
 ## Layout
@@ -13,14 +13,15 @@ the CLI stayed `idxg`.
 | `src/idxstore.py` | 112 | ctypes bindings for `libIndexStore.dylib`: units, records, occurrences, symbol relations |
 | `src/build.py` | 492 | parallel extractor, SQLite writer, atomic swap, registry update |
 | `src/project.py` | 395 | project registry, store detection, layered config, staleness |
-| `src/idxg.py` | 2073 | the CLI: every subcommand, plus the shared query helpers |
+| `src/idxg.py` | 2105 | the CLI: every subcommand, plus the shared query helpers |
 | `src/viz.py` | 2389 | HTML explorer: data slicing and the whole page as one Python string |
 | `src/deadcode.py` | 98 | dead-code candidate query and its text cross-check |
 | `src/history.py` | 1513 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; per-commit narration, weekly digest, timeline, vault export |
 | `src/crash.py` | ~170 | stack trace parsing (Apple, lldb, free text), frame resolution by file:line or name, callers, since-date for a git ref |
 | `src/templates/weekly-digest.html` | | the knowledge vault's fixed digest layout, copied verbatim; only `{{TITLE}}` and `{{DIGEST_JSON}}` are substituted |
-| `src/mcp_server.py` | 333 | stdio MCP server wrapping the CLI functions |
+| `src/mcp_server.py` | 393 | stdio MCP server wrapping the CLI functions |
 | `bench/bench_mcp.py` | | latency and payload size per MCP tool |
+| `tests/smoke.py` | | every module parses and imports, and the MCP server lists its tools; CI runs it on 3.9 and the latest Python |
 
 `bin/idxg`, `bin/idxg-build` and `bin/idxg-history` are POSIX sh wrappers that resolve symlinks before
 locating `src/`, so `install.sh` can link them into `~/.local/bin`.
@@ -112,6 +113,12 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
   `autoindex: false` into the global config, which both that flag and `NO_AUTOINDEX=1`
   honour, and a reinstall keeps whatever watch setting the plist already had. `idxg init`
   rewrites the plist so the new project's store joins the watch list.
+- **A user can always get back to a release that starts.** `idxg update` checks out
+  release tags (detached), never `main`, runs `tests/smoke.py` from the new tag and returns to
+  the previous commit when it fails. `idxg update --to <version>` installs any earlier release.
+  When `idxg` itself cannot import, `mcp_server.py` still starts in a degraded mode that serves
+  `index_status` alone, and that tool prints the `git` command to go back. Keep `smoke.py`
+  standard library only and runnable from any tag, since update runs the new tag's copy.
 - **The old name must keep working for anyone who installed it.** `project.py` moves the
   legacy config and cache directories on import and rewrites registry paths; `idxg init`
   and `deinit` recognise the `ios-codebase-indexer` CLAUDE.md markers and the
@@ -143,7 +150,7 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
 ## Verifying a change
 
 ```bash
-/usr/bin/python3 -W error -c "import ast,pathlib; [ast.parse(pathlib.Path(f).read_text()) for f in __import__('glob').glob('src/*.py')]"
+/usr/bin/python3 tests/smoke.py                   # parse, import and MCP start on the system 3.9
 cd /path/to/an/indexed/project && idxg-build --jobs 8 && idxg status
 python3 /path/to/repo/bench/bench_mcp.py          # latency and payload per MCP tool
 idxg history build && idxg history timeline --periods 2 && idxg docs search "architecture"
