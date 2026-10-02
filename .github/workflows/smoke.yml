@@ -1,0 +1,26 @@
+name: smoke
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    # macOS because idxstore loads libIndexStore from Xcode at import, and because the
+    # system Python there is the 3.9 that most users run the MCP server on.
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: [system, "3.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - if: matrix.python != 'system'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Parse, import and start the MCP server
+        run: |
+          if [ "${{ matrix.python }}" = system ]; then PY=/usr/bin/python3; else PY=python; fi
+          "$PY" --version
+          "$PY" tests/smoke.py
