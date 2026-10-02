@@ -1554,7 +1554,8 @@ def export_vault(hdb_path, out_dir, docs=True, history=True, modules_min_commits
             for r in rows:
                 pr = f" [#{r['pr']}]({repo}/pull/{r['pr']})" if r["pr"] and repo else (f" #{r['pr']}" if r["pr"] else "")
                 lines.append(f"- {r['day']} {r['short']} {r['subject']}{pr}")
-            fm = ["---", f"title: {_yaml(f'History - {project} - {p['period']}')}", "source: git-history",
+            title = f"History - {project} - {p['period']}"
+            fm = ["---", f"title: {_yaml(title)}", "source: git-history",
                   f"repo: {_yaml(repo or project)}", f"branch: {branch}", f"period: {p['period']}",
                   f"range: {e['first']}..{e['last']}", f"published: {e['last']}", f"clipped: {today}",
                   "---", ""]
