@@ -70,7 +70,7 @@ Restart any Claude Code session that was already running so it sees the MCP serv
    idxg search "something you know exists"
    idxg trace SomeSymbol --direction in --first     # who calls it, with call sites
    idxg history log --symbol SomeSymbol --narrate   # who changed it, when, and why
-   idxg open                                        # the explorer
+   idxg open                                        # the explorer, served locally
    ```
 
 ### Sharing with a team
@@ -119,9 +119,14 @@ box offers ready-made prompts, filled in from what is on screen, with a copy but
 
 The graph tab draws the modules and symbols you pick as an architecture diagram: what uses
 them on the left, what they use on the right, cards grouped in boxes by module or layer, one
-arrow colour per edge kind, with direct neighbours or two hops out. It only knows what the page holds: the
-most connected symbols (1,500 by default, `--limit` changes it) and each one's strongest
-edges, so a missing link there is not proof of absence.
+arrow colour per edge kind, with direct neighbours or two hops out.
+
+`idxg open` serves the explorer from a small local server (Ctrl-C stops it), so the graph
+tab can search every symbol in the graph and load all the edges of whatever you pick, the
+150 heaviest per symbol. `idxg open --static` opens the file instead, and the file is also
+what you can send someone. On its own it holds only the most connected symbols (1,500 by
+default, `idxg viz --limit` changes it) and each one's strongest edges, so a missing link
+there is not proof of absence.
 
 ## Triage a crash
 

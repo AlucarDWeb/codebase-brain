@@ -145,7 +145,9 @@ whether it is running and what it last did; `idxg refresh` rebuilds now.
   `--verify`, and report survivors as candidates rather than as unused code.
 - **`idxg viz` size scales with the slice.** Repo-wide defaults to the top 1500 symbols
   by degree; `--scope <Module>` includes every symbol in that module. Keep
-  `--per-node-cap` near 14 to stay under ~8 MB.
+  `--per-node-cap` near 14 to stay under ~8 MB. Point a user who cannot find a symbol in
+  the graph tab to `idxg open`, which serves the page locally so that tab searches every
+  symbol and loads the edges of any pick. Opened as a file, the page has only its slice.
 - **Keep calls cheap.** `trace_path` caps rows and bytes and tells you when it truncated;
   narrow with `--fanout`, `--depth` or `--kind` rather than raising the caps. An anchored
   literal `--name '^Foo$'` is an indexed lookup, a general regex scans every symbol.

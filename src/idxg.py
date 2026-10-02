@@ -1673,8 +1673,19 @@ def cmd_open(a):
                             os.path.basename(db).replace(".db", "-explorer.html"))
         if not os.path.exists(html):
             raise SystemExit("no explorer yet; run idxg viz")
-    print(html)
-    subprocess.run(["open", html])
+    if a.static:
+        print(html)
+        subprocess.run(["open", html])
+        return
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import serve
+    db = entry.get("db") or db_path(a.db)
+
+    def ready(url):
+        print(f"explorer at {url}\nthe graph tab can now reach every symbol in {os.path.basename(db)}; "
+              "Ctrl-C stops the server", flush=True)
+        subprocess.run(["open", url])
+    serve.serve(html, db, port=a.port, on_ready=ready)
 
 
 def store_settled(stores, quiet_seconds, max_wait):
@@ -2073,7 +2084,9 @@ def build_parser():
     p.add_argument("--to", metavar="VERSION", help="install this release instead, e.g. 0.2.16 to go back")
     p.set_defaults(fn=cmd_update, no_stale_check=True)
 
-    p = sub.add_parser("open", help="open the HTML explorer for this project")
+    p = sub.add_parser("open", help="serve the HTML explorer locally and open it, so it can reach every symbol")
+    p.add_argument("--static", action="store_true", help="open the file instead; it holds only the most connected symbols")
+    p.add_argument("--port", type=int, default=0, help="port to serve on (default: a free one)")
     p.set_defaults(fn=cmd_open, no_stale_check=True)
 
     p = sub.add_parser("autoindex", help="background refresh via a launchd agent")

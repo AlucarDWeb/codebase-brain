@@ -259,7 +259,9 @@ def slice_data(db, scope=None, limit=3000, edge_cap=60000, per_node_cap=45, deta
                            WHERE {where} ORDER BY (s.in_deg + s.out_deg) DESC LIMIT ?""",
                        args + [limit if limit else -1]).fetchall()
     ids = {r[0]: i for i, r in enumerate(rows)}
-    nodes = [{"n": r[1], "k": r[2], "m": r[3] or "", "f": r[4] or "", "l": r[5] or 0,
+    # "h" is the usr_hash as a string (a JS number would lose its low bits); the local server
+    # keys its answers on it, so fetched symbols merge with the ones embedded here.
+    nodes = [{"h": str(r[0]), "n": r[1], "k": r[2], "m": r[3] or "", "f": r[4] or "", "l": r[5] or 0,
               "i": r[6], "o": r[7], "ci": r[8], "co": r[9], "rc": r[10]} for r in rows]
     extra, edges = {}, []
 
@@ -275,7 +277,7 @@ def slice_data(db, scope=None, limit=3000, edge_cap=60000, per_node_cap=45, deta
         if not r:
             return None
         idx = len(nodes)
-        nodes.append({"n": r[0], "k": r[1], "m": r[2] or "", "f": r[3] or "", "l": r[4] or 0,
+        nodes.append({"h": str(uh), "n": r[0], "k": r[1], "m": r[2] or "", "f": r[3] or "", "l": r[4] or 0,
                       "i": r[5], "o": r[6], "ci": r[7], "co": r[8], "rc": r[9], "x": 1})
         extra[uh] = idx
         return idx
@@ -1758,6 +1760,67 @@ const EDGE_COLORS = { CALLS: '#3987e5', REFERENCES: '#8a96a8', CONTAINS: '#9085e
 const edgeColor = k => EDGE_COLORS[k] || '#8a96a8';
 // Layout cost grows with the square of the node count, so the graph stops growing here.
 const GRAPH_MAX = 160;
+// Served by `idxg open`, the page can ask the whole graph for symbols and neighbours it does
+// not embed; opened as a file it cannot, and works on what it holds.
+const LIVE = { on: false, loaded: new Set(), byHash: new Map(), timer: null, trunc: 0 };
+D.nodes.forEach((n, i) => { if (n.h) LIVE.byHash.set(n.h, i); });
+if (location.protocol.startsWith('http'))
+  fetch('api/ping').then(r => r.ok ? r.json() : null).then(j => {
+    if (!j || !j.ok) return;
+    LIVE.on = true;
+    const note = document.getElementById('gnote');
+    if (note) note.textContent = graphNote();
+  }).catch(() => {});
+function graphNote() {
+  return LIVE.on
+    ? 'served by idxg open: search reaches every symbol in the graph, and picked symbols load all their edges (the 150 heaviest per symbol). Module links count calls only.'
+    : `symbols come from the ${fmt(D.slice_size)} most connected ones in this page, and each carries only its strongest edges; module links count calls only. Run idxg open to reach every symbol, or ask the agent (trace_path, find_references).`;
+}
+function liveNode(nd) {
+  let i = LIVE.byHash.get(nd.h);
+  if (i === undefined) { i = D.nodes.length; D.nodes.push(nd); LIVE.byHash.set(nd.h, i); }
+  return i;
+}
+function liveMerge(res) {
+  for (const nd of res.nodes) liveNode(nd);
+  for (const [sh, dh, k, f, l, n] of res.edges) {
+    const a = LIVE.byHash.get(sh), b = LIVE.byHash.get(dh);
+    if (a === undefined || b === undefined) continue;
+    if ((out.get(a) || []).some(e => e[0] === b && e[1] === k)) continue;
+    if (!out.has(a)) out.set(a, []); out.get(a).push([b, k, f, l, n]);
+    if (!inn.has(b)) inn.set(b, []); inn.get(b).push([a, k, f, l, n]);
+  }
+  if (res.total > res.kept) LIVE.trunc++;
+}
+function liveLoad(idxs) {
+  const todo = [...new Set(idxs)].filter(i => D.nodes[i] && D.nodes[i].h && !LIVE.loaded.has(i));
+  if (!todo.length) return Promise.resolve(false);
+  // Marked before the fetch returns, so a redraw in between never asks twice or loops on a failure.
+  todo.forEach(i => LIVE.loaded.add(i));
+  return Promise.all(todo.map(i => fetch('api/neighbours?h=' + D.nodes[i].h)
+    .then(r => r.ok ? r.json() : null).then(res => { if (res) liveMerge(res); }).catch(() => {})))
+    .then(() => true);
+}
+function liveExpand() {
+  if (!LIVE.on) return;
+  const picks = graphSel.filter(k => !gIsMod(k)).map(k => +k.slice(2));
+  liveLoad(picks).then(changed => {
+    if (graphOpts.hops < 2) { if (changed) drawGraph(); return; }
+    const first = [...graphCollect().hop].filter(([k, h]) => h === 1 && !gIsMod(k)).map(([k]) => +k.slice(2));
+    liveLoad(first).then(more => { if (changed || more) drawGraph(); });
+  });
+}
+function liveSearch(text) {
+  clearTimeout(LIVE.timer);
+  LIVE.timer = setTimeout(() => {
+    fetch('api/search?q=' + encodeURIComponent(text)).then(r => r.ok ? r.json() : null).then(res => {
+      const q = document.getElementById('gq');
+      if (!res || !q || q.value !== text) return;
+      for (const nd of res.nodes) liveNode(nd);
+      graphSearch(text, true);
+    }).catch(() => {});
+  }, 180);
+}
 let graphFocus = null;
 const gIsMod = key => key.startsWith('m:');
 const gName = key => gIsMod(key) ? key.slice(2) : D.nodes[+key.slice(2)].n;
@@ -1857,7 +1920,7 @@ function graphTab() {
     s.dataset.init = '1';
     const card = el('div', 'card');
     card.append(el('h2', null, 'connections between the modules and symbols you pick'));
-    card.append(el('div', 'loc', `symbols come from the ${fmt(D.slice_size)} most connected ones in this page, and each carries only its strongest edges; module links count calls only. For anything outside that, ask the agent (trace_path, find_references).`));
+    const note = el('div', 'loc', graphNote()); note.id = 'gnote'; card.append(note);
     const filters = el('div', 'filters'); filters.style.marginTop = '10px';
     const q = el('input'); q.type = 'text'; q.id = 'gq';
     q.placeholder = 'add a module or symbol: type part of its name (Module.symbol narrows), Enter picks the first';
@@ -1908,7 +1971,7 @@ function pickFromSearch(key) {
   graphSearch('');
   drawGraph();
 }
-function graphSearch(text) {
+function graphSearch(text, fromServer) {
   const box = document.getElementById('gres'); box.innerHTML = '';
   const q = text.trim().toLowerCase();
   if (!q) return [];
@@ -1939,12 +2002,16 @@ function graphSearch(text) {
     r.onclick = () => pickFromSearch(key);
     box.append(r);
   }
-  if (!keys.length) box.append(el('div', 'empty', 'nothing in this page matches'));
+  if (LIVE.on && !fromServer) liveSearch(text);
+  if (!keys.length) box.append(el('div', 'empty', LIVE.on && !fromServer ? 'searching every symbol'
+    : LIVE.on ? 'no symbol in the graph matches'
+    : `nothing in this page matches. It holds only the ${fmt(D.slice_size)} most connected symbols; run idxg open to search all of them`));
   else if (syms.length > 30) box.append(el('div', 'loc', `${fmt(syms.length - 30)} more symbols match; type more of the name`));
   return keys;
 }
 
 function drawGraph() {
+  liveExpand();
   const chips = document.getElementById('gchips'); chips.innerHTML = '';
   for (const k of graphSel) {
     const c = el('span', gIsMod(k) ? 'chip m' : 'chip');
@@ -2087,6 +2154,7 @@ function drawGraph() {
     (all.length > links.length ? ` (${all.length - links.length} between neighbours hidden)` : '') +
     (capped ? `; stopped at ${GRAPH_MAX} nodes, so pick fewer or show fewer neighbours` : '') +
     (!links.length ? '; none recorded between these in this page, with the kinds ticked above' : '') +
+    (LIVE.trunc ? '; some picks have more edges than the 150 heaviest loaded' : '') +
     '. Click a node for details, shift-click to add or remove it.';
   graphInfo();
   graphEdges(all);
