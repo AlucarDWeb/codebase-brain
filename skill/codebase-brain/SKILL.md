@@ -161,8 +161,10 @@ whether it is running and what it last did; `idxg refresh` rebuilds now.
 `idxg crash <file|->` (MCP `triage_crash` with the trace text) parses Apple crash reports,
 lldb backtraces, Sentry frames or any text carrying `Type.method(labels:)` and
 `File.swift:line`. Frames in system images are skipped. Each in-repo frame is resolved by
-file and line when the trace has them, else by name (a type the graph does not know is
-left unresolved rather than guessed), and printed with its definition, its callers with
+file and line when the trace has them, else by name, and left unresolved whenever it could
+mean more than one thing: a file name shared by several files resolves to the one defining
+the frame's function, a frame naming a type matches only that type's method, and the source
+lines Sentry quotes under a frame are ignored. Each is printed with its definition, its callers with
 call sites, and the commits touching its file since `--since` (a date or a git ref such as
 the previous release tag). Then read the PR bodies with `idxg history show`.
 

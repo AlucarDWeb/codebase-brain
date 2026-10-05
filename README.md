@@ -150,8 +150,11 @@ file since the tag you pass:
       2026-09-04  6149e25a545  [WPA-116102] Hide the location chip when ...  #21766
 ```
 
-System frames are skipped. A frame whose type the graph does not know is reported as
-unresolved, never matched to a same-named method on another type. The output shows what
+System frames are skipped, and so are the source lines Sentry quotes under a frame. A
+frame is matched only to code it can mean: when several files share the trace's file name,
+the one defining the frame's function wins, and a frame that names a type is matched only
+to that type's own method. Anything else is reported as unresolved, never guessed. The
+output shows what
 changed near the crash, not why it crashed: the graph has no runtime data, so a force
 unwrap or a race is invisible to it.
 

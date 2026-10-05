@@ -31,6 +31,10 @@ SYSTEM_SYMBOL_PREFIXES = ("start", "_dispatch", "__CF", "_CF", "CF", "_os_", "__
 SYSTEM_IMAGES = ("libswift", "libsystem", "libdispatch", "libobjc", "dyld", "UIKitCore", "UIKit", "Foundation",
                  "CoreFoundation", "CoreGraphics", "GraphicsServices", "QuartzCore", "SwiftUI", "AttributeGraph",
                  "libc++", "CFNetwork", "Combine", "libxpc", "FrontBoardServices", "libclosured")
+# Sentry's source context under a frame: "  → 91 │     controller.view.backgroundColor = ..."
+GUTTER_RE = re.compile(r"^\s*(?:→\s*)?\d+\s*[│|]")
+# Accessor frames ("Type.prop.getter") name the property one segment up.
+ACCESSOR_WORDS = ("getter", "setter", "modify", "didSet", "willSet", "unsafeAddressor", "unsafeMutableAddressor")
 CALLABLE_KINDS = ("InstanceMethod", "ClassMethod", "StaticMethod", "Function", "Constructor", "Destructor",
                   "InstanceProperty", "StaticProperty", "ClassProperty")
 
@@ -70,9 +74,11 @@ def _strip_wrappers(sym):
 def parse(text):
     """Frames as dicts: index, image, symbol, file, line, raw. Unparseable lines are skipped."""
     frames = []
-    for raw in demangle(text).splitlines():
+    lines = demangle(text).splitlines()
+    structured_trace = any(r.match(l) for l in lines for r in (APPLE_RE, LLDB_RE, FRAME_RE, SENTRY_RE))
+    for raw in lines:
         line = raw.rstrip()
-        if not line.strip():
+        if not line.strip() or GUTTER_RE.match(line):
             continue
         m = APPLE_RE.match(line) or None
         image, sym, file, ln, idx = None, None, None, None, None
@@ -93,6 +99,10 @@ def parse(text):
             else:
                 # A bare line counts as a frame only when it names a file and line or a call;
                 # thread headers and queue names would otherwise resolve to random symbols.
+                # Beside structured frames a bare line is the source a report quotes under a
+                # frame, such as `self?.subject.onNext(())`, never a frame of its own.
+                if structured_trace:
+                    continue
                 structured = False
                 fl = FILE_LINE_RE.search(line)
                 if fl:
@@ -110,7 +120,13 @@ def parse(text):
         if objc:
             candidates.append({"type": objc.group(1), "name": objc.group(3)})
         else:
-            for tok in sorted(SWIFT_RE.findall(sym), key=len, reverse=True):
+            plain = sym
+            while True:
+                bare = re.sub(r"<[^<>]*>", "", plain)
+                if bare == plain:
+                    break
+                plain = bare
+            for tok in sorted(SWIFT_RE.findall(plain), key=len, reverse=True):
                 base = tok.split("(")[0]
                 parts = base.split(".")
                 name = parts[-1] + (tok[tok.index("("):] if "(" in tok else "")
@@ -125,17 +141,41 @@ def parse(text):
     return frames
 
 
-def _by_file_line(db, basename, line):
+def _bare(name):
+    return (name or "").split("(")[0]
+
+
+def frame_names(frame):
+    return {c["type"] if c["name"] in ACCESSOR_WORDS and c.get("type") else _bare(c["name"])
+            for c in frame["candidates"]}
+
+
+def _by_file_line(db, basename, line, names=()):
+    """The symbol enclosing basename:line, or None when the frame could mean more than one file."""
     rows = db.execute("""SELECT s.usr_hash, s.name, s.kind, s.module, s.def_line, f.rel FROM symbols s
                          JOIN files f ON f.path_hash = s.def_path_hash
                          WHERE f.in_repo = 1 AND (f.rel = ? OR f.rel GLOB ?) AND s.name != ''
                          ORDER BY s.def_line""", (basename, "*/" + basename)).fetchall()
-    if not rows:
-        return None, []
-    below = [r for r in rows if r["def_line"] and r["def_line"] <= line]
-    callables = [r for r in below if r["kind"] in CALLABLE_KINDS and not r["name"].startswith(("getter:", "setter:", "init:"))]
-    pick = (callables or below or rows)[-1] if (callables or below) else rows[0]
-    return pick, rows
+    by_file = {}
+    for r in rows:
+        by_file.setdefault(r["rel"], []).append(r)
+    picks = {}
+    for rel, rs in by_file.items():
+        below = [r for r in rs if r["def_line"] and r["def_line"] <= line]
+        callables = [r for r in below if r["kind"] in CALLABLE_KINDS and not r["name"].startswith(("getter:", "setter:", "init:"))]
+        if callables or below:
+            picks[rel] = (callables or below)[-1]
+    # Files share basenames (a module and its legacy copy, or a vendored Lock.swift and ours),
+    # so the frame's own function name decides which file it means. Closures and inlined code
+    # put the line outside the named function, hence the second, file-wide test.
+    if names:
+        named = {rel: p for rel, p in picks.items() if _bare(p["name"]) in names}
+        if not named:
+            named = {rel: p for rel, p in picks.items() if any(_bare(r["name"]) in names for r in by_file[rel])}
+        picks = named
+    if len(picks) != 1:
+        return None, rows
+    return next(iter(picks.values())), rows
 
 
 def _parents(db, uh):
@@ -154,13 +194,10 @@ def _by_name(db, cand):
     if not rows:
         return None
     if cand.get("type"):
+        # A frame that names its type means that type only: another type's method of the same
+        # name, or a library type's method matched against ours, points the reader at the wrong code.
         typed = [r for r in rows if cand["type"] in _parents(db, r["usr_hash"])]
-        if typed:
-            return typed[0]
-        # The trace names a type the graph does not have: guessing another type's method
-        # of the same name would point the reader at the wrong code.
-        if not db.execute("SELECT 1 FROM symbols WHERE name = ? AND in_repo = 1 LIMIT 1", (cand["type"],)).fetchone():
-            return None
+        return typed[0] if typed else None
     if cand.get("module"):
         mod = [r for r in rows if r["module"] == cand["module"]]
         if mod:
@@ -170,7 +207,7 @@ def _by_name(db, cand):
 
 def resolve_frame(db, frame):
     if frame["file"] and frame["line"]:
-        sym, _ = _by_file_line(db, frame["file"], frame["line"])
+        sym, _ = _by_file_line(db, frame["file"], frame["line"], frame_names(frame))
         if sym:
             return sym, "file:line"
     for cand in frame["candidates"]:

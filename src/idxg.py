@@ -1076,7 +1076,7 @@ def cmd_crash(a):
     if a.since and not since:
         raise SystemExit(f"--since {a.since!r} is neither a date nor a git ref in {root}")
     frames = crash.parse(text)
-    resolved, skipped_system, unresolved = [], 0, []
+    resolved, skipped_system, unresolved, seen = [], 0, [], set()
     for fr in frames:
         if crash.is_system(fr):
             skipped_system += 1
@@ -1085,6 +1085,10 @@ def cmd_crash(a):
         if not sym:
             unresolved.append(fr)
             continue
+        # Recursion and Sentry's compiler-generated twins repeat a frame; once is enough.
+        if sym["usr_hash"] in seen:
+            continue
+        seen.add(sym["usr_hash"])
         entry = {"frame": fr["index"], "raw": fr["raw"], "symbol": sym["name"], "kind": sym["kind"],
                  "module": sym["module"], "file": sym["rel"], "def_line": sym["def_line"],
                  "trace_line": fr["line"], "resolved_by": how,

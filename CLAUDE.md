@@ -145,9 +145,14 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
 - **PR descriptions are optional enrichment, never required.** `enrich_prs` runs only when
   `gh auth status` succeeds and the origin is GitHub; every reader must cope with
   `pr_body` being NULL (not fetched) or `''` (fetched, PR gone).
-- **Crash triage never guesses a type.** `crash._by_name` returns nothing when the trace
-  names a type the graph lacks, instead of another type's method of the same name; a
-  bare trace line counts as a frame only when it carries a file and line or a call.
+- **Crash triage never guesses.** `crash._by_name` returns nothing when the type a frame
+  names has no member of that name, instead of another type's method of the same name.
+  `_by_file_line` keeps only the file whose symbols carry the frame's function name, since
+  basenames repeat (OnboardingFeature and LegacyMonolith both have an
+  `AppOnboardingFlowCoordinator.swift`, and RxSwift's `Lock.swift` matched ours), and returns
+  nothing when several files or none qualify. A bare trace line counts as a frame only when
+  it carries a file and line or a call, and only in a trace with no structured frames:
+  beside them it is source Sentry quotes under a frame.
 - **The vault export is append-only.** `_write_clipping` never rewrites a file; a changed
   source becomes a date-suffixed clipping and the state file records which. That is the
   contract the knowledge vaults compile from, so a re-run must produce zero new files when
