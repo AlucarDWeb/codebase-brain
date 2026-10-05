@@ -230,6 +230,23 @@ def normalize(path, root, prefix_map):
     return p, None, 0
 
 
+def source_gone(path, root, prefix_map, _seen={}):
+    """True for a repository source file the index store still remembers but the checkout no
+    longer has: the store keeps every file ever compiled, deleted ones and other branches' too."""
+    key = (path, root)
+    if key in _seen:
+        return _seen[key]
+    abs_p, _, in_repo = normalize(path, root, prefix_map)
+    if in_repo:
+        gone = not os.path.exists(abs_p)
+    else:
+        # normalize() calls an execroot source path external when the file is missing from the checkout.
+        tail = abs_p.split("/execroot/_main/", 1)[1] if "/execroot/_main/" in abs_p else None
+        gone = bool(root) and tail is not None and not tail.startswith(("bazel-out", "bazel-bin", "external/"))
+    _seen[key] = gone
+    return gone
+
+
 def _pid_alive(who):
     """True when the lock's `pid N` still names a running process."""
     try:
@@ -329,8 +346,14 @@ def main():
                     if k not in records:
                         records[k] = (store,) + v
     print(f"records: {len(records)} from {len(stores)} store(s)  ({time.time()-t0:.1f}s)", flush=True)
+    gone = {r for r, v in records.items() if source_gone(v[1], root, prefix_map)}
+    if gone:
+        files_gone = {records[r][1] for r in gone}
+        print(f"  skipping {len(gone)} records of {len(files_gone)} source files no longer in the checkout", flush=True)
+    all_units = [u for u in all_units if not (u[2] and source_gone(u[2], root, prefix_map))]
 
-    batch = [(v[0], r, v[1], v[2]) for r, v in records.items() if args.include_system or not v[3]]
+    batch = [(v[0], r, v[1], v[2]) for r, v in records.items()
+             if r not in gone and (args.include_system or not v[3])]
     if args.limit_records:
         batch = batch[:args.limit_records]
     print(f"extracting {len(batch)} records with {jobs} workers", flush=True)
@@ -440,7 +463,7 @@ def main():
         "format_version": str(ix.lib.indexstore_format_version()),
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "prefix_map": json.dumps(prefix_map), "build_seconds": f"{time.time()-t0:.1f}",
-        "units": str(len(all_units)), "records": str(len(batch)),
+        "units": str(len(all_units)), "records": str(len(batch)), "records_gone": str(len(gone)),
         "stores": json.dumps(stores),
         "store_signature": json.dumps(prj.store_signature(stores)),
     }.items():

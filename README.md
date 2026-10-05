@@ -264,7 +264,9 @@ about 7 minutes the first time and 290 MB.
 ## Limits
 
 - The graph is a snapshot of the last compile. Line numbers drift and new code is missing
-  until you rebuild.
+  until you rebuild. The compiler's index store also keeps every file it ever compiled,
+  including deleted files and files from branches you built once; the build skips any whose
+  source is no longer in the checkout, so a rebuild on `main` describes `main`.
 - It only knows what was compiled. Before concluding "nothing calls this", run
   `idxg coverage <path>`: no records means "not compiled", not "not used".
 - Module attribution follows the compiled index, so per-module history counts are lower

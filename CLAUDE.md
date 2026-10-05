@@ -11,7 +11,7 @@ the CLI stayed `idxg`.
 | File | Lines | Role |
 |---|---|---|
 | `src/idxstore.py` | 112 | ctypes bindings for `libIndexStore.dylib`: units, records, occurrences, symbol relations |
-| `src/build.py` | 492 | parallel extractor, SQLite writer, atomic swap, registry update |
+| `src/build.py` | 545 | parallel extractor, SQLite writer, atomic swap, registry update |
 | `src/project.py` | 395 | project registry, store detection, layered config, staleness |
 | `src/idxg.py` | 2137 | the CLI: every subcommand, plus the shared query helpers |
 | `src/viz.py` | 2534 | HTML explorer: data slicing and the whole page as one Python string |
@@ -67,6 +67,12 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
   is meant to replace.
 - **Swift symbol names carry argument labels** (`map(_:)`, `subscript(_:)`). Strip at the
   first `(` before any text search, or ripgrep finds nothing.
+- **The index store never forgets a file.** It keeps records for every file ever compiled,
+  deleted ones and other branches' included, and a rebuild re-reads all of them. In October
+  2026 the Wallapop graph held 50 SearchFeature files `main` no longer has (a SwiftUI branch,
+  deleted use cases, the removed Kernel module), and agents spent a dozen calls telling them
+  apart. `build.source_gone` drops every record and unit whose source is missing from the
+  checkout; `meta.records_gone` counts them.
 - **`build.py` writes to `<db>.building` and swaps.** Clear `-wal`/`-shm` on *both* sides
   of the swap: a stale journal beside the destination makes SQLite report
   `database disk image is malformed`. Any writer touching a live database (the status

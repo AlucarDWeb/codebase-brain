@@ -111,7 +111,8 @@ whether it is running and what it last did; `idxg refresh` rebuilds now.
   command it prints, because `idxg` cannot run in that state.
 - **It is a snapshot of the last compile, not the working tree.** After edits, line
   numbers drift and new symbols are missing until you rebuild. Rebuild rather than trust
-  a stale trace.
+  a stale trace. The build leaves out files that are no longer in the checkout, so code
+  deleted on `main` or only present on another branch drops out at the next rebuild.
 - **Coverage equals what was compiled.** In a monorepo where the IDE's build server
   declares a subset of targets, everything outside that closure plus its dependencies has
   zero records, and unbuilt test/snapshot targets are usually the biggest gap. Run
