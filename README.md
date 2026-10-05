@@ -160,7 +160,8 @@ unwrap or a race is invisible to it.
 
 ## Command reference
 
-Every query command accepts `--json`, and `--db <path>` to target another project. Symbols
+Every query command accepts `--json`, and `--db` to target another project, given as its
+folder or its graph file (`idxg projects` lists both). Symbols
 resolve by bare name, `Module.Name` or USR; an ambiguous name lists candidates unless you
 pass `--first`.
 

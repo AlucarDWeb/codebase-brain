@@ -27,15 +27,17 @@ def path_layer(rel, depth=2):
 
 
 def db_path(arg):
-    if arg:
+    if arg and not os.path.isdir(os.path.expanduser(arg)):
         return os.path.expanduser(arg)
-    root = prj.find_root()
+    # A folder means the project it belongs to: agents pass the repo they were told about.
+    root = prj.find_root(os.path.expanduser(arg) if arg else None)
     db = prj.db_for(root)
     if os.path.exists(db):
         return db
+    known = "".join(f"\n    {r}" for r in sorted(prj.load_registry()))
     raise SystemExit(f"no graph for {root}\n"
-                     f"  run: idxg init            (index this project and write its skill)\n"
-                     f"  or:  idxg --db <path> ...  (query another project's graph)")
+                     + (f"  indexed projects (pass one as --db, or as db to the MCP tools):{known}\n" if known else "")
+                     + "  run: idxg init            (index this project and write its skill)")
 
 
 def connect(arg, write=False):
@@ -1619,9 +1621,21 @@ def cmd_init(a):
         print("  idxg autoindex --install --watch   keep it fresh in the background")
 
 
+def _root_for(db_arg):
+    """The project a --db argument names, whether it is the project folder or its graph file."""
+    if db_arg:
+        p = os.path.expanduser(db_arg)
+        if os.path.isdir(p):
+            return prj.find_root(p)
+        for root, e in prj.load_registry().items():
+            if e.get("db") == p:
+                return root
+    return prj.find_root()
+
+
 def cmd_refresh(a):
     reg = prj.load_registry()
-    roots = list(reg) if a.all else [prj.find_root()]
+    roots = list(reg) if a.all else [_root_for(getattr(a, "db", None))]
     for root in roots:
         entry = reg.get(root, {})
         db = entry.get("db") or prj.db_for(root)
@@ -1656,15 +1670,16 @@ def cmd_projects(a):
             stale = reason if st else "fresh"
         else:
             stale = "missing db"
-        rows.append((root, e.get("symbols", 0), e.get("indexed_at", ""), stale))
+        rows.append((root, e.get("symbols", 0), e.get("indexed_at", ""), stale, db))
     if a.json:
-        print(json.dumps([{"root": r, "symbols": s, "indexed_at": t, "state": st}
-                          for r, s, t, st in rows], indent=2))
+        print(json.dumps([{"root": r, "symbols": s, "indexed_at": t, "state": st, "db": d}
+                          for r, s, t, st, d in rows], indent=2))
         return
     w = max(len(r[0]) for r in rows)
     print(f"{'project'.ljust(w)}  {'symbols':>9}  {'indexed':<19}  state")
-    for r, syms, t, st in rows:
-        print(f"{r.ljust(w)}  {syms:>9,}  {t:<19}  {st}")
+    for r, syms, t, st, d in rows:
+        print(f"{r.ljust(w)}  {syms:>9,}  {t:<19}  {st}\n{''.ljust(w)}  graph: {d}")
+    print("\nPass a project folder as db to query it from anywhere.")
 
 
 def cmd_open(a):

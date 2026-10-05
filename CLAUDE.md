@@ -13,14 +13,14 @@ the CLI stayed `idxg`.
 | `src/idxstore.py` | 112 | ctypes bindings for `libIndexStore.dylib`: units, records, occurrences, symbol relations |
 | `src/build.py` | 492 | parallel extractor, SQLite writer, atomic swap, registry update |
 | `src/project.py` | 395 | project registry, store detection, layered config, staleness |
-| `src/idxg.py` | 2118 | the CLI: every subcommand, plus the shared query helpers |
+| `src/idxg.py` | 2137 | the CLI: every subcommand, plus the shared query helpers |
 | `src/viz.py` | 2534 | HTML explorer: data slicing and the whole page as one Python string |
 | `src/serve.py` | 240 | local HTTP server behind `idxg open`: serves the explorer and answers every tab's lookups (symbols, neighbours, kinds, dead code, doc full text) from the whole db, read-only |
 | `src/deadcode.py` | 98 | dead-code candidate query and its text cross-check |
 | `src/history.py` | 1513 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; per-commit narration, weekly digest, timeline, vault export |
-| `src/crash.py` | ~170 | stack trace parsing (Apple, lldb, free text), frame resolution by file:line or name, callers, since-date for a git ref |
+| `src/crash.py` | 252 | stack trace parsing (Apple, lldb, free text), frame resolution by file:line or name, callers, since-date for a git ref |
 | `src/templates/weekly-digest.html` | | the knowledge vault's fixed digest layout, copied verbatim; only `{{TITLE}}` and `{{DIGEST_JSON}}` are substituted |
-| `src/mcp_server.py` | 393 | stdio MCP server wrapping the CLI functions |
+| `src/mcp_server.py` | 397 | stdio MCP server wrapping the CLI functions |
 | `bench/bench_mcp.py` | | latency and payload size per MCP tool |
 | `tests/smoke.py` | | every module parses and imports, and the MCP server lists its tools; CI runs it on 3.9 and the latest Python |
 

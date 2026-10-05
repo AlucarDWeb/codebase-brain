@@ -74,7 +74,9 @@ idxg history vault --out <vault dir>                  # clippings for a knowledg
 idxg deinit --purge                                   # un-index a project completely
 ```
 
-`--json` on any query command, `--db <path>` to target another project's graph. Symbols
+`--json` on any query command, `--db` to target another project, as its folder or its graph
+file. The MCP tools take the same `db`; when the working directory is not the project, pass
+the project folder that `list_projects` prints. Symbols
 resolve by bare name, `Module.Name`, or USR; ambiguous names list candidates unless you
 pass `--first`.
 

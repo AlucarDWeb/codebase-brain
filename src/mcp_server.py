@@ -32,12 +32,15 @@ def recovery_hint():
             f"git -C {REPO_DIR} checkout --detach $(git -C {REPO_DIR} describe --tags --abbrev=0 HEAD^)\n"
             "then restart Claude Code. Report it at https://github.com/AlucarDWeb/codebase-brain/issues")
 
+DB_ARG = {"type": "string", "description": "the project folder or its graph .db path; defaults to the "
+                                            "project around the working directory (list_projects shows both)"}
+
 TOOLS = [
     {"name": "index_status",
      "description": "Index-store graph status: counts, edge kinds, build time, how much of the repo "
                     "the compiled index actually covers, the history db, and whether a newer "
                     "codebase-brain release exists. Call this first in a session.",
-     "inputSchema": {"type": "object", "properties": {"db": {"type": "string"}}}},
+     "inputSchema": {"type": "object", "properties": {"db": DB_ARG}}},
     {"name": "search_graph",
      "description": "Find symbols by full-text query (BM25 over camel-split names), name regex, kind, "
                     "module, file glob, or degree. Results carry exact definition file:line and "
@@ -51,7 +54,7 @@ TOOLS = [
          "min_degree": {"type": "integer"}, "max_degree": {"type": "integer"},
          "limit": {"type": "integer", "default": 40}, "offset": {"type": "integer", "default": 0},
          "include_external": {"type": "boolean", "description": "include symbols defined outside the repo"},
-         "db": {"type": "string"}}}},
+         "db": DB_ARG}}},
     {"name": "trace_path",
      "description": "Walk resolved call/reference edges from a symbol. direction in=callers, out=callees, "
                     "both. Every edge carries the exact source location of the call site.",
@@ -66,21 +69,21 @@ TOOLS = [
                       "description": "cap printed rows; a wide trace is truncated with a note"},
          "max_bytes": {"type": "integer", "default": 8000,
                        "description": "cap the payload size of one call"},
-         "db": {"type": "string"}},
+         "db": DB_ARG},
          "required": ["symbol"]}},
     {"name": "find_references",
      "description": "Every recorded occurrence of a symbol with its role (definition, reference, read, "
                     "write, call, dynamic), grouped by file.",
      "inputSchema": {"type": "object", "properties": {
          "symbol": {"type": "string"}, "limit": {"type": "integer", "default": 200},
-         "db": {"type": "string"}}, "required": ["symbol"]}},
+         "db": DB_ARG}, "required": ["symbol"]}},
     {"name": "get_code_snippet",
      "description": "Print a symbol's definition from disk, using the index's definition line and a "
                     "brace-balanced extent.",
      "inputSchema": {"type": "object", "properties": {
          "symbol": {"type": "string"}, "max_lines": {"type": "integer", "default": 200},
          "max_bytes": {"type": "integer", "default": 6000},
-         "db": {"type": "string"}}, "required": ["symbol"]}},
+         "db": DB_ARG}, "required": ["symbol"]}},
     {"name": "query_graph",
      "description": "Read-only SQL over the graph. Tables: symbols(usr_hash,usr,name,kind,lang,module,"
                     "def_path_hash,def_line,in_deg,out_deg,call_in,call_out,ref_count,in_repo), "
@@ -88,18 +91,18 @@ TOOLS = [
                     "defs, files(path_hash,path,rel,in_repo,module), units. Call get_schema for details.",
      "inputSchema": {"type": "object", "properties": {
          "query": {"type": "string"}, "limit": {"type": "integer", "default": 200},
-         "db": {"type": "string"}}, "required": ["query"]}},
+         "db": DB_ARG}, "required": ["query"]}},
     {"name": "check_index_coverage",
      "description": "For each path (file or directory), report whether the compiled index covers it. "
                     "A file with no records was never compiled in the indexed build: grep it instead. "
                     "Absence is never proof a symbol does not exist.",
      "inputSchema": {"type": "object", "properties": {
-         "paths": {"type": "array", "items": {"type": "string"}}, "db": {"type": "string"}},
+         "paths": {"type": "array", "items": {"type": "string"}}, "db": DB_ARG},
          "required": ["paths"]}},
     {"name": "get_architecture",
      "description": "Layers, modules by symbol count, cross-module call hotspots, and build targets.",
      "inputSchema": {"type": "object", "properties": {
-         "limit": {"type": "integer", "default": 20}, "db": {"type": "string"}}}},
+         "limit": {"type": "integer", "default": 20}, "db": DB_ARG}}},
     {"name": "find_dead_code",
      "description": "Symbols nothing in the indexed build reaches: no call, no reference, no "
                     "override, no occurrence beyond their own definition. Structural edges are "
@@ -115,21 +118,22 @@ TOOLS = [
          "include_tests": {"type": "boolean"}, "include_vendor": {"type": "boolean"},
          "lang": {"type": "string", "enum": ["Swift", "ObjC", "C", "any"]},
          "limit": {"type": "integer", "default": 100}, "offset": {"type": "integer", "default": 0},
-         "db": {"type": "string"}}}},
+         "db": DB_ARG}}},
     {"name": "refresh_index",
      "description": "Reindex the project when the compiler's index store has moved on, which it "
                     "does after any build. Takes minutes on a large repo, so call it when a trace "
                     "looks stale rather than routinely; index_status reports staleness for free.",
      "inputSchema": {"type": "object", "properties": {
          "force": {"type": "boolean", "description": "reindex even when nothing changed"},
-         "db": {"type": "string"}}}},
+         "db": DB_ARG}}},
     {"name": "list_projects",
-     "description": "Every indexed project on this machine, with symbol counts and whether each "
-                    "graph is fresh or behind its index store.",
+     "description": "Every indexed project on this machine, with symbol counts, whether each graph is "
+                    "fresh or behind its index store, and its graph path. Any other tool queries one of "
+                    "them from anywhere when given its folder as db.",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "get_schema",
      "description": "Full db schema plus the edge-kind and occurrence-role vocabulary.",
-     "inputSchema": {"type": "object", "properties": {"db": {"type": "string"}}}},
+     "inputSchema": {"type": "object", "properties": {"db": DB_ARG}}},
     {"name": "get_history",
      "description": "Commits on the project's main branch that touched a path, a symbol's file, a "
                     "module, or matched an author or subject text. Each row: date, short sha, author, "
@@ -149,7 +153,7 @@ TOOLS = [
                                                         "(from the PR description), which files and modules"},
          "limit": {"type": "integer", "default": 30},
          "max_bytes": {"type": "integer", "default": 12000, "description": "cap the payload of one call"},
-         "db": {"type": "string"}}}},
+         "db": DB_ARG}}},
     {"name": "get_commit",
      "description": "One commit in full: message body, PR, tickets, and every file it changed with "
                     "line counts and module attribution.",
@@ -157,7 +161,7 @@ TOOLS = [
          "sha": {"type": "string", "description": "full or short sha, or a PR number as #123"},
          "max_files": {"type": "integer", "default": 80},
          "max_body": {"type": "integer", "default": 4000, "description": "cap the PR description"},
-         "db": {"type": "string"}},
+         "db": DB_ARG},
          "required": ["sha"]}},
     {"name": "get_digest",
      "description": "Weekly or per-release digest of the main branch: headline and stats for the window, the changes "
@@ -169,7 +173,7 @@ TOOLS = [
          "week": {"type": "string", "description": "ISO week, e.g. 2026-W36"},
          "release": {"type": "string", "description": "digest of everything that first shipped in this release tag"},
          "since": {"type": "string"}, "until": {"type": "string"},
-         "max_bytes": {"type": "integer", "default": 16000}, "db": {"type": "string"}}}},
+         "max_bytes": {"type": "integer", "default": 16000}, "db": DB_ARG}}},
     {"name": "triage_crash",
      "description": "Map a symbolicated stack trace (Apple crash report, lldb backtrace, Sentry frames, or "
                     "any text with Type.method(labels:) and File.swift:line) onto the graph and the "
@@ -182,14 +186,14 @@ TOOLS = [
          "since": {"type": "string", "description": "YYYY-MM-DD or a git ref such as the previous release tag"},
          "frames": {"type": "integer", "default": 6}, "callers": {"type": "integer", "default": 5},
          "commits": {"type": "integer", "default": 5}, "max_bytes": {"type": "integer", "default": 12000},
-         "db": {"type": "string"}}, "required": ["trace"]}},
+         "db": DB_ARG}, "required": ["trace"]}},
     {"name": "get_releases",
      "description": "Version tags of the project: when each release branched off the history branch, "
                     "when it was tagged, and how many commits first shipped in it. Every commit from "
                     "get_history and get_commit carries its release, so 'which release has this "
                     "feature' is one call.",
      "inputSchema": {"type": "object", "properties": {
-         "limit": {"type": "integer", "default": 30}, "db": {"type": "string"}}}},
+         "limit": {"type": "integer", "default": 30}, "db": DB_ARG}}},
     {"name": "get_churn",
      "description": "Where change concentrates: commits, lines and authors per module, component "
                     "directory, file or author over a window (default the last 365 days).",
@@ -197,7 +201,7 @@ TOOLS = [
          "since": {"type": "string", "description": "YYYY-MM-DD"},
          "by": {"type": "string", "enum": ["module", "component", "file", "author"], "default": "module"},
          "ext": {"type": "string", "description": "restrict to one extension, e.g. swift"},
-         "limit": {"type": "integer", "default": 25}, "db": {"type": "string"}}}},
+         "limit": {"type": "integer", "default": 25}, "db": DB_ARG}}},
     {"name": "get_timeline",
      "description": "Narrative history of the project: an overview paragraph, then one paragraph per "
                     "period (year, quarter or month by span) with commit and author counts, most "
@@ -206,7 +210,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "periods": {"type": "integer", "default": 6, "description": "most recent periods to narrate; 0 = all"},
          "granularity": {"type": "string", "enum": ["year", "quarter", "month"]},
-         "db": {"type": "string"}}}},
+         "db": DB_ARG}}},
     {"name": "list_docs",
      "description": "Markdown documentation tracked in the repository (READMEs, CLAUDE.md notes, "
                     "skills, design docs), each with kind, module attribution and last-commit date. "
@@ -215,32 +219,32 @@ TOOLS = [
          "module": {"type": "string"}, "kind": {"type": "string",
                     "description": "readme, agent-note, skill, guide or doc"},
          "path_glob": {"type": "string"}, "limit": {"type": "integer", "default": 60},
-         "db": {"type": "string"}}}},
+         "db": DB_ARG}}},
     {"name": "search_docs",
      "description": "Full-text search (BM25) over the repository's markdown docs, with a snippet "
                     "per hit. Use it before reading a doc file, and for 'how does this project do X' "
                     "questions the code graph cannot answer.",
      "inputSchema": {"type": "object", "properties": {
          "query": {"type": "string"}, "limit": {"type": "integer", "default": 10},
-         "db": {"type": "string"}}, "required": ["query"]}},
+         "db": DB_ARG}, "required": ["query"]}},
     {"name": "get_doc",
      "description": "The content of one repository doc by path (or a unique path suffix), with its "
                     "last-commit date. Truncated at max_bytes with a note.",
      "inputSchema": {"type": "object", "properties": {
          "path": {"type": "string"}, "max_bytes": {"type": "integer", "default": 12000},
-         "db": {"type": "string"}}, "required": ["path"]}},
+         "db": DB_ARG}, "required": ["path"]}},
     {"name": "refresh_history",
      "description": "Pull new commits from the history branch and re-sync repo docs. Incremental and "
                     "cheap after the first run; index_status shows when it last ran.",
      "inputSchema": {"type": "object", "properties": {
          "full": {"type": "boolean", "description": "rebuild from the first commit"},
-         "db": {"type": "string"}}}},
+         "db": DB_ARG}}},
     {"name": "build_visualizer",
      "description": "Generate the self-contained HTML graph explorer and return its path.",
      "inputSchema": {"type": "object", "properties": {
          "scope": {"type": "string", "description": "module name or path glob"},
          "out": {"type": "string"}, "limit": {"type": "integer"},
-         "db": {"type": "string"}}}},
+         "db": DB_ARG}}},
 ]
 
 DEFAULTS = {"json": False, "db": None, "exact": False, "no_stale_check": True}
