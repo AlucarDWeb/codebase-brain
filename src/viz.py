@@ -1170,6 +1170,7 @@ function symbolsTab() {
   const kinds = [...new Set(D.nodes.map(n => n.k))].sort();
   const mods = [...new Set(D.nodes.map(n => n.m).filter(Boolean))].sort();
   fill('kind', 'all kinds', kinds); fill('module', 'all modules', mods);
+  if (LIVE.on) liveFacets();
   for (const id of ['q', 'kind', 'module', 'sort'])
     document.getElementById(id).addEventListener('input', render);
   render();
@@ -1180,6 +1181,7 @@ function fill(id, label, vals) {
 }
 function setModule(m) { symbolsTab(); document.getElementById('module').value = m; render(); }
 function render() {
+  if (LIVE.on) return liveRender();
   const q = document.getElementById('q').value.trim();
   const kind = document.getElementById('kind').value;
   const mod = document.getElementById('module').value;
@@ -1201,12 +1203,14 @@ function render() {
   const key = { deg: n => -(n.i + n.o), ci: n => -n.ci, co: n => -n.co, rc: n => -n.rc,
                 name: n => n.n.toLowerCase() }[sort];
   list.sort((a, b) => { const x = key(D.nodes[a]), y = key(D.nodes[b]); return x < y ? -1 : x > y ? 1 : 0; });
-  document.getElementById('count').textContent =
-    `${fmt(list.length)} of ${fmt(D.nodes.filter(n => !n.x).length)} sliced symbols` +
-    (list.length > 400 ? ' (showing first 400)' : '');
+  symbolRows(list.slice(0, 400), `${fmt(list.length)} of ${fmt(D.nodes.filter(n => !n.x).length)} sliced symbols` +
+    (list.length > 400 ? ' (showing first 400)' : ''));
+}
+function symbolRows(list, countText) {
+  document.getElementById('count').textContent = countText;
   const box = document.getElementById('rows'); box.innerHTML = '';
   let group = null;
-  for (const i of list.slice(0, 400)) {
+  for (const i of list) {
     const n = D.nodes[i];
     const g = `${n.m || '?'} (${n.f || 'external'})`;
     if (g !== group) { group = g; box.append(el('div', 'group', g)); }
@@ -1221,6 +1225,8 @@ function render() {
 function select(i) {
   if (i < 0 || !D.nodes[i]) return;
   selected = i;
+  // Embedded symbols carry only their strongest edges; the server has the rest.
+  if (LIVE.on && !LIVE.loaded.has(i)) liveLoad([i]).then(() => { if (selected === i) select(i); });
   for (const r of document.querySelectorAll('.row')) r.classList.toggle('sel', +r.dataset.i === i);
   const n = D.nodes[i];
   const d = document.getElementById('detail'); d.innerHTML = '';
@@ -1292,8 +1298,9 @@ function neighborhood(i) {
     x: 500 + (id === i ? 0 : 300 * Math.cos(2 * Math.PI * k / arr.length)),
     y: 200 + (id === i ? 0 : 150 * Math.sin(2 * Math.PI * k / arr.length)), vx: 0, vy: 0 }));
   const links = [];
-  for (const [a, b] of D.edges.map(e => [e[0], e[1]]))
-    if (pos.has(a) && pos.has(b) && a !== b) links.push({ s: pos.get(a), t: pos.get(b), n: 10 });
+  for (const a of arr)
+    for (const [b] of out.get(a) || [])
+      if (pos.has(b) && a !== b) links.push({ s: pos.get(a), t: pos.get(b), n: 10 });
   simulate(nodes, links, 1000, 400, 200, 180);
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 1000 400');
@@ -1324,6 +1331,7 @@ function deadTab() {
   const s = document.getElementById('dead');
   if (s.dataset.init) return;
   s.dataset.init = '1';
+  if (LIVE.on && !LIVE.dead) setTimeout(liveDead, 0);
   const cov = D.meta.coverage ? `${D.meta.coverage} tracked sources carry index records` +
     (D.meta.coverage_pct ? ` (${D.meta.coverage_pct}%)` : '') : 'coverage unknown';
   const warn = el('div', 'card');
@@ -1702,10 +1710,31 @@ function docsTab() {
       rows.append(r);
     }
     if (!n) rows.append(el('div', 'empty', 'nothing matches'));
+    if (LIVE.on && q.trim().length > 1) liveDocs(q, rows, web, branch);
   };
   document.getElementById('docq').addEventListener('input', render);
   document.getElementById('dockind').addEventListener('input', render);
   render();
+}
+
+function liveDocs(q, rows, web, branch) {
+  clearTimeout(LIVE.docTimer);
+  LIVE.docTimer = setTimeout(() => {
+    fetch('api/docs?q=' + encodeURIComponent(q)).then(r => r.ok ? r.json() : null).then(res => {
+      if (!res || !res.docs.length || document.getElementById('docq').value.toLowerCase() !== q) return;
+      const empty = rows.querySelector('.empty'); if (empty) empty.remove();
+      rows.append(el('div', 'group', `text matches, best first (${res.docs.length})`));
+      for (const d of res.docs) {
+        const r = el('div', 'row'); r.style.cursor = 'default'; r.style.flexWrap = 'wrap';
+        const nm = web ? el('a', 'ext', d.title || d.path) : el('span', 'nm', d.title || d.path);
+        if (web) { nm.href = `${web}/blob/${branch}/${d.path}`; nm.target = '_blank'; }
+        nm.title = d.path;
+        const snip = el('div', 'loc', d.snip || ''); snip.style.flexBasis = '100%';
+        r.append(nm, el('span', 'badge', d.kind), el('span', 'meta', `${d.published || 'undated'}  ${d.path}`), snip);
+        rows.append(r);
+      }
+    }).catch(() => {});
+  }, 250);
 }
 
 /* ---------- banner: update available, graph stale ---------- */
@@ -1768,9 +1797,57 @@ if (location.protocol.startsWith('http'))
   fetch('api/ping').then(r => r.ok ? r.json() : null).then(j => {
     if (!j || !j.ok) return;
     LIVE.on = true;
-    const note = document.getElementById('gnote');
-    if (note) note.textContent = graphNote();
+    liveReady();
   }).catch(() => {});
+function liveReady() {
+  const note = document.getElementById('gnote');
+  if (note) note.textContent = graphNote();
+  const sym = document.getElementById('symbols');
+  if (sym && sym.dataset.init) { liveFacets(); render(); }
+  const dd = document.getElementById('dead');
+  if (dd && dd.dataset.init && !LIVE.dead) liveDead();
+}
+function liveFacets() {
+  const keep = id => document.getElementById(id).value;
+  // The module list is complete in the page already; kinds come from the server.
+  const mod = keep('module');
+  fill('module', 'all modules', D.modules.map(([m]) => m).sort());
+  document.getElementById('module').value = mod;
+  fetch('api/facets').then(r => r.ok ? r.json() : null).then(res => {
+    if (!res) return;
+    const kind = keep('kind');
+    fill('kind', 'all kinds', res.kinds);
+    document.getElementById('kind').value = kind;
+  }).catch(() => {});
+}
+function liveRender() {
+  const v = id => document.getElementById(id).value;
+  const ask = new URLSearchParams({ q: v('q').trim(), kind: v('kind'), module: v('module'), sort: v('sort') }).toString();
+  LIVE.symAsk = ask;
+  clearTimeout(LIVE.symTimer);
+  document.getElementById('count').textContent = 'searching every symbol';
+  LIVE.symTimer = setTimeout(() => {
+    fetch('api/symbols?' + ask).then(r => r.ok ? r.json() : null).then(res => {
+      if (!res || LIVE.symAsk !== ask) return;
+      const list = res.nodes.map(liveNode);
+      symbolRows(list, `${fmt(res.total)} symbols in the graph match` +
+        (res.total > list.length ? ` (showing the first ${fmt(list.length)})` : ''));
+    }).catch(() => { document.getElementById('count').textContent = 'the server did not answer; is idxg open still running?'; });
+  }, 200);
+}
+function liveDead() {
+  LIVE.dead = 'loading';
+  const s = document.getElementById('dead');
+  const wait = el('div', 'loc', `loading all ${fmt(D.dead_total)} candidates from the server; the list below is the first ${fmt(D.dead.length)}`);
+  wait.id = 'deadwait'; s.prepend(wait);
+  fetch('api/dead').then(r => r.ok ? r.json() : null).then(res => {
+    if (!res) { wait.remove(); return; }
+    D.dead = res.dead; D.dead_total = res.dead_total; D.test_only = res.test_only;
+    LIVE.dead = 'done';
+    s.innerHTML = ''; delete s.dataset.init;
+    if (s.offsetParent !== null) deadTab();
+  }).catch(() => wait.remove());
+}
 function graphNote() {
   return LIVE.on
     ? 'served by idxg open: search reaches every symbol in the graph, and picked symbols load all their edges (the 150 heaviest per symbol). Module links count calls only.'

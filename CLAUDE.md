@@ -14,8 +14,8 @@ the CLI stayed `idxg`.
 | `src/build.py` | 492 | parallel extractor, SQLite writer, atomic swap, registry update |
 | `src/project.py` | 395 | project registry, store detection, layered config, staleness |
 | `src/idxg.py` | 2118 | the CLI: every subcommand, plus the shared query helpers |
-| `src/viz.py` | 2457 | HTML explorer: data slicing and the whole page as one Python string |
-| `src/serve.py` | 123 | local HTTP server behind `idxg open`: serves the explorer and answers its graph tab's search and neighbour lookups from the whole db, read-only |
+| `src/viz.py` | 2534 | HTML explorer: data slicing and the whole page as one Python string |
+| `src/serve.py` | 240 | local HTTP server behind `idxg open`: serves the explorer and answers every tab's lookups (symbols, neighbours, kinds, dead code, doc full text) from the whole db, read-only |
 | `src/deadcode.py` | 98 | dead-code candidate query and its text cross-check |
 | `src/history.py` | 1513 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; per-commit narration, weekly digest, timeline, vault export |
 | `src/crash.py` | ~170 | stack trace parsing (Apple, lldb, free text), frame resolution by file:line or name, callers, since-date for a git ref |
@@ -74,7 +74,8 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
 - **Embedded nodes carry `h`, the `usr_hash` as a string.** The served graph tab merges what
   `serve.py` returns into `D.nodes` and the `out`/`inn` maps by that key. A JS number would
   drop the low bits of a 64-bit hash and merge two symbols into one. The page must keep working
-  from `file://`, where there is no server; `LIVE.on` gates every fetch.
+  from `file://`, where there is no server; `LIVE.on` gates every fetch. A new search in the
+  page needs a server endpoint too, or it silently sees only the slice.
 - **The explorer path must derive from the database path.** `viz` and `build` once
   derived it differently and wrote two divergent files, so `idxg open` served a stale
   page.

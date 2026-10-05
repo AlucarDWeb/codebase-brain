@@ -121,10 +121,12 @@ The graph tab draws the modules and symbols you pick as an architecture diagram:
 them on the left, what they use on the right, cards grouped in boxes by module or layer, one
 arrow colour per edge kind, with direct neighbours or two hops out.
 
-`idxg open` serves the explorer from a small local server (Ctrl-C stops it), so the graph
-tab can search every symbol in the graph and load all the edges of whatever you pick, the
-150 heaviest per symbol. `idxg open --static` opens the file instead, and the file is also
-what you can send someone. On its own it holds only the most connected symbols (1,500 by
+`idxg open` serves the explorer from a small local server (Ctrl-C stops it), and every search
+in it then goes to the whole graph. The symbols tab filters all symbols, and a selected
+symbol shows all its callers and callees. The graph tab loads all the edges of whatever you
+pick, the 150 heaviest per symbol. The dead code tab lists every candidate, and the docs
+filter adds full-text matches with a snippet. `idxg open --static` opens the file instead,
+and the file is also what you can send someone. On its own it holds only the most connected symbols (1,500 by
 default, `idxg viz --limit` changes it) and each one's strongest edges, so a missing link
 there is not proof of absence.
 
