@@ -494,6 +494,9 @@ def main():
                ("edge_kinds", json.dumps(dict(db.execute(
                    "SELECT kind, COUNT(*) FROM edges GROUP BY kind ORDER BY 2 DESC").fetchall()))))
     db.commit()
+    # Readers open the graph read-only, and a read-only connection cannot recreate the WAL
+    # journal deleted below, so the swapped-in file must not be in WAL mode.
+    db.execute("PRAGMA journal_mode=DELETE")
     db.close()
     # Both sides of the swap: the scratch file's journals, and the destination's, which a
     # reader may have left behind in WAL mode. Applying a stale WAL to a fresh database
