@@ -21,7 +21,8 @@ below only when the server is not connected or when a flag has no tool equivalen
 
 | Question | Use |
 |---|---|
-| who calls / what calls this, override or conformance chains | `idxg trace` (MCP `trace_path`) |
+| how a module is organised, what it uses, who uses it and through what, where change spreads | `idxg module <Name>` (MCP `describe_module`) |
+| who calls / what calls this, override or conformance chains | `idxg trace --code` (MCP `trace_path`, code on by default) |
 | every use of a symbol, with read/write/call roles | `idxg refs` |
 | find a symbol, filter by kind/module/file/degree | `idxg search` |
 | module-level coupling, layer counts, hotspots | `idxg arch` |
@@ -221,7 +222,7 @@ Treat the output as the list of places and pull requests to read first.
 
 ## MCP
 
-Tools: `index_status`, `search_graph`, `trace_path`, `find_references`,
+Tools: `index_status`, `describe_module`, `search_graph`, `trace_path`, `find_references`,
 `get_code_snippet`, `query_graph`, `check_index_coverage`, `get_architecture`,
 `get_schema`, `build_visualizer`; history and docs: `get_history`, `get_commit`,
 `get_churn`, `get_timeline`, `get_digest`, `get_releases`, `list_docs`, `search_docs`,

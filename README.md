@@ -96,6 +96,7 @@ its own. Every tool has a CLI equivalent.
 | Every use of a symbol, with read, write and call roles | `find_references` | `idxg refs` |
 | Read a definition from disk | `get_code_snippet` | `idxg snippet` |
 | Was this file compiled at all | `check_index_coverage` | `idxg coverage` |
+| One module: layers, what it uses, who uses it, hotspots, coverage | `describe_module` | `idxg module` |
 | Layers, modules, cross-module hotspots | `get_architecture` | `idxg arch` |
 | Code nothing reaches, or only tests reach | `find_dead_code` | `idxg dead`, `idxg dead --test-only` |
 | Who changed this, when, in which PR, and why | `get_history` | `idxg history log --narrate` |

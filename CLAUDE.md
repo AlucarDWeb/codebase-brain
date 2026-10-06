@@ -17,10 +17,11 @@ the CLI stayed `idxg`.
 | `src/viz.py` | 2534 | HTML explorer: data slicing and the whole page as one Python string |
 | `src/serve.py` | 240 | local HTTP server behind `idxg open`: serves the explorer and answers every tab's lookups (symbols, neighbours, kinds, dead code, doc full text) from the whole db, read-only |
 | `src/deadcode.py` | 98 | dead-code candidate query and its text cross-check |
-| `src/history.py` | 1513 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; per-commit narration, weekly digest, timeline, vault export |
-| `src/crash.py` | 252 | stack trace parsing (Apple, lldb, free text), frame resolution by file:line or name, callers, since-date for a git ref |
+| `src/modulecard.py` | 140 | `describe_module`: a module's folder and layers, used and imported-only dependencies, dependents with the symbols they use, type connectivity ranking, coverage |
+| `src/history.py` | 1745 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; releases from tags and `release/<version>` branches, hotfix picks by patch id; per-commit narration, weekly digest, timeline, vault export |
+| `src/crash.py` | 260 | stack trace parsing (Apple, lldb, Sentry, free text), frame resolution by file:line (checked against the frame's function name) or by typed name, callers, the fork point of a `--since` ref |
 | `src/templates/weekly-digest.html` | | the knowledge vault's fixed digest layout, copied verbatim; only `{{TITLE}}` and `{{DIGEST_JSON}}` are substituted |
-| `src/mcp_server.py` | 397 | stdio MCP server wrapping the CLI functions |
+| `src/mcp_server.py` | 431 | stdio MCP server wrapping the CLI functions, with start-up `INSTRUCTIONS` that tell an agent where to begin |
 | `bench/bench_mcp.py` | | latency and payload size per MCP tool |
 | `tests/smoke.py` | | every module parses and imports, and the MCP server lists its tools; CI runs it on 3.9 and the latest Python |
 

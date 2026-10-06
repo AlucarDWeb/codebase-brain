@@ -18,6 +18,20 @@ if BROKEN:
     SERVER["degraded"] = True
 
 
+# Sent once at start-up, so an agent that never loads the skill still knows where to begin.
+INSTRUCTIONS = """codebase-brain answers questions about an indexed Swift/ObjC repository from the compiler's own records, its commit history and its docs. When the working directory is not the project, pass the project folder as `db` (list_projects shows the indexed ones).
+
+Where to start:
+- How a module is organised, what it uses, who uses it, where a change spreads: describe_module.
+- A crash report or stack trace: triage_crash with the pasted trace and since=<previous release tag>. Per frame it gives the code, its callers and the commits that release lacks, each with the release it first shipped in (hotfix branches included) and the opening of its PR. Call get_commit only for a full PR description.
+- Who calls X, what X calls: trace_path (Type.member names work; call-site code is included). Every occurrence: find_references.
+- Who changed X and why: get_history with narrate. What a release shipped: get_releases, get_digest with release.
+- What the repo's own docs say: search_docs, then get_doc.
+- Anything else: query_graph with SQL, after get_schema.
+
+The graph is a snapshot of the last compile: index_status says whether it is behind and how much of the repo it covers. A file with no index records was never compiled, so search its text instead and never call code unused on the graph's word alone."""
+
+
 def recovery_hint():
     if idxg:
         prev = idxg.previous_release()
@@ -103,6 +117,17 @@ TOOLS = [
      "description": "Layers, modules by symbol count, cross-module call hotspots, and build targets.",
      "inputSchema": {"type": "object", "properties": {
          "limit": {"type": "integer", "default": 20}, "db": DB_ARG}}},
+    {"name": "describe_module",
+     "description": "One module's card in a single call: its folder and layers with their most connected "
+                    "types, the first-party modules it uses (and those it imports without using any symbol), "
+                    "every module that uses it with the symbols they call and one call site, the types a "
+                    "change would spread furthest from, and how much of its folder the build compiled. "
+                    "Start here for 'how is module X organised', 'what depends on X', 'what does X need'.",
+     "inputSchema": {"type": "object", "properties": {
+         "module": {"type": "string", "description": "module name as the compiler knows it, e.g. SearchFeature"},
+         "types": {"type": "integer", "default": 10, "description": "how many most connected types to list"},
+         "users": {"type": "integer", "default": 20, "description": "how many dependent modules to detail"},
+         "max_bytes": {"type": "integer", "default": 12000}, "db": DB_ARG}, "required": ["module"]}},
     {"name": "find_dead_code",
      "description": "Symbols nothing in the indexed build reaches: no call, no reference, no "
                     "override, no occurrence beyond their own definition. Structural edges are "
@@ -292,6 +317,9 @@ def call(name, a):
         return run(idxg.cmd_coverage, ns(db=db, paths=a["paths"]))
     if name == "get_architecture":
         return run(idxg.cmd_arch, ns(db=db, limit=a.get("limit", 20)))
+    if name == "describe_module":
+        return run(idxg.cmd_module, ns(db=db, module=a["module"], types=a.get("types", 10), users=a.get("users", 20),
+                                       max_bytes=a.get("max_bytes", 12000)))
     if name == "find_dead_code":
         return run(idxg.cmd_dead, ns(db=db, module=a.get("module"), kind=a.get("kind"),
                                      verify=bool(a.get("verify")), test_only=bool(a.get("test_only")),
@@ -368,7 +396,9 @@ def main():
             if method == "initialize":
                 send({"jsonrpc": "2.0", "id": mid, "result": {
                     "protocolVersion": params.get("protocolVersion", "2024-11-05"),
-                    "capabilities": {"tools": {}}, "serverInfo": SERVER}})
+                    "capabilities": {"tools": {}}, "serverInfo": SERVER,
+                    "instructions": INSTRUCTIONS if not BROKEN else
+                    "codebase-brain could not start; call index_status for the way back to a working release."}})
             elif method in ("notifications/initialized", "initialized"):
                 continue
             elif method == "tools/list":

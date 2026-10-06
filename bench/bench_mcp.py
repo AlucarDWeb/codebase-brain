@@ -27,6 +27,16 @@ def pick_symbol():
 
 
 SYM = pick_symbol()
+
+
+def pick_module():
+    db = idxg.connect(None)
+    row = db.execute("SELECT module FROM symbols WHERE in_repo = 1 AND name = ? LIMIT 1", (SYM,)).fetchone()
+    db.close()
+    return row["module"] if row and row["module"] else SYM
+
+
+MODULE = pick_module()
 print(f"project: {os.getcwd()}\nsymbol:  {SYM}\n")
 
 CALLS = [
@@ -40,6 +50,7 @@ CALLS = [
     ("get_code_snippet", {"symbol": SYM}),
     ("get_architecture", {"limit": 5}),
     ("find_dead_code", {"limit": 20}),
+    ("describe_module", {"module": MODULE}),
     ("list_projects", {}),
     ("check_index_coverage", {"paths": ["."]}),
     ("query_graph", {"query": "SELECT kind, COUNT(*) n FROM symbols WHERE in_repo=1 "

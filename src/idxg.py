@@ -5,6 +5,7 @@ import argparse, json, os, re, shutil, sqlite3, subprocess, sys, textwrap
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import project as prj
 import deadcode
+import modulecard
 
 VERSION = prj.VERSION
 
@@ -667,6 +668,89 @@ def cmd_viz(a):
     if a.open:
         subprocess_open = __import__("subprocess")
         subprocess_open.run(["open", out])
+
+
+def cmd_module(a):
+    """One module's card: folder and layers, what it uses, who uses it and through which symbols,
+    its most connected types, and how much of its folder the build compiled."""
+    db = connect(a.db)
+    root = meta(db).get("repo_root", "")
+    mod, near = modulecard.resolve(db, a.module)
+    if not mod:
+        raise SystemExit(f"no module named {a.module!r} in the graph" + (f"; close: {', '.join(near)}" if near else ""))
+    mod_root, base, rels = modulecard.folder(db, mod)
+    ranking = modulecard.type_ranking(db, mod)
+    deps = modulecard.depends_on(db, mod)
+    users = modulecard.used_by(db, mod)
+    known = set(modulecard.modules(db))
+    used = {r[0] for r in deps}
+    unused_imports = sorted(modulecard.imports(root, rels) & known - used - {mod})
+    siblings = db.execute("""SELECT module, COUNT(*) FROM files WHERE in_repo = 1 AND rel GLOB ? AND module != ?
+                             AND module IS NOT NULL AND module != '' GROUP BY module ORDER BY 2 DESC""",
+                          (mod_root + "/*", mod)).fetchall()
+    sibling_names = {s for s, _ in siblings}
+    under = [r[0] for r in db.execute("SELECT rel FROM files WHERE in_repo = 1 AND rel GLOB ?", (mod_root + "/*",))]
+    tracked, covered = modulecard.coverage(root, mod_root, under)
+    symbols = db.execute("SELECT COUNT(*) FROM symbols WHERE module = ? AND in_repo = 1", (mod,)).fetchone()[0]
+
+    def layer_of(rel):
+        sub = rel[len(base) + 1:] if rel and base and rel.startswith(base + "/") else (rel or "")
+        return sub.split("/", 1)[0] if "/" in sub else "(top level)"
+
+    groups = {"outside": {}, "folder": {}, "tests": {}}
+    for k, v in users.items():
+        key = "folder" if k in sibling_names else "tests" if modulecard.is_test(k) else "outside"
+        groups[key][k] = v
+    if getattr(a, "json", False):
+        print(json.dumps({"module": mod, "root": mod_root, "files": len(rels), "symbols": symbols,
+                          "coverage": {"tracked": tracked, "indexed": covered},
+                          "same_folder": dict(siblings), "layers": modulecard.layers(rels, base),
+                          "depends_on": [dict(module=d, symbols=s, edges=e) for d, s, e in deps],
+                          "imported_unused": unused_imports,
+                          "used_by": {g: {k: [dict(symbol=n, kind=kd, uses=c, site=st) for n, kd, c, st in v[:5]]
+                                          for k, v in mods.items()} for g, mods in groups.items()},
+                          "types": ranking[:a.types]}, indent=1))
+        return
+    out = [f"{mod}  {mod_root}  {len(rels)} source files, {symbols:,} symbols"]
+    if siblings:
+        out.append("same folder: " + ", ".join(f"{s} ({n} file{'s' * (n != 1)})" for s, n in siblings))
+    out.append(f"coverage: {covered}/{tracked} tracked source files under {mod_root}/ have index records"
+               + ("; the others were never compiled, so nothing here speaks for them" if covered < tracked else ""))
+    by_layer = {}
+    for t in ranking:
+        by_layer.setdefault(layer_of(t["rel"]), []).append(t["name"])
+    out += ["", f"layers (folders under {base}/), with their most connected types:"]
+    for seg, n in modulecard.layers(rels, base):
+        noun = "files" if n != 1 else "file "
+        out.append(f"  {seg:<18} {n:>4} {noun}  {', '.join(by_layer.get(seg, [])[:4]) or '-'}")
+    out += ["", f"depends on {len(deps)} first-party modules (distinct symbols used):"]
+    out += textwrap.wrap(", ".join(f"{d} {n}" for d, n, _ in deps), 100, initial_indent="  ", subsequent_indent="  ")
+    if unused_imports:
+        out.append("  imported, no symbol used: " + ", ".join(unused_imports))
+    total = lambda v: sum(c for _, _, c, _ in v)
+    out += ["", f"used by {len(groups['outside'])} modules outside its folder (symbols they use, one call site):"]
+    ranked = sorted(groups["outside"].items(), key=lambda kv: -total(kv[1]))
+    for k, v in ranked[:a.users]:
+        out.append(f"  {k}: " + ", ".join(f"{n} x{c}" for n, _, c, _ in v[:3]) + f"  ({v[0][3]})")
+    if len(ranked) > a.users:
+        rest = ranked[a.users:]
+        out.append(f"  and {len(rest)} more, using {sum(total(v) for _, v in rest):,} times in all: "
+                   + ", ".join(k for k, _ in rest[:15]) + (" ..." if len(rest) > 15 else ""))
+    for label in ("folder", "tests"):
+        if groups[label]:
+            out.append(f"  {'same folder' if label == 'folder' else 'tests'}: "
+                       + ", ".join(f"{k} ({total(v)})" for k, v in sorted(groups[label].items(), key=lambda kv: -total(kv[1]))))
+    out += ["", "most connected types (distinct symbols that use it / that it uses; members and extensions "
+                "folded in, structural edges ignored):"]
+    for i, t in enumerate(ranking[:a.types], 1):
+        out.append(f"  {i:>2}. {t['name']:<40} {t['kind']:<8} used by {t['used_by']:>4}  uses {t['uses']:>4}  {layer_of(t['rel'])}")
+    spent = 0
+    for i, line in enumerate(out):
+        if spent + len(line) + 1 > a.max_bytes:
+            print(f"... {a.max_bytes:,} byte budget reached after {i} of {len(out)} lines; raise max_bytes or lower types")
+            break
+        print(line)
+        spent += len(line) + 1
 
 
 def cmd_dead(a):
@@ -1462,7 +1546,7 @@ def install_claude_md(root, db_file, target=None):
 
 codebase-brain is optional here: some people have it installed and some do not. Check
 before using it. It is available when the `codebase-brain` MCP tools are connected
-(`trace_path`, `search_graph`, `get_history`, `triage_crash`, `search_docs`, ...) or when
+(`describe_module`, `trace_path`, `get_history`, `triage_crash`, `search_docs`, ...) or when
 `idxg` runs in a shell. If neither is there, skip this section and work as usual: do not
 install it, do not ask about it, and do not mention it.
 
@@ -1978,6 +2062,13 @@ def build_parser():
                    help="max edges kept per symbol per direction (default: config viz_per_node_cap)")
     p.add_argument("--title"); p.add_argument("--open", action="store_true")
     p.set_defaults(fn=cmd_viz)
+
+    p = sub.add_parser("module", help="one module's card: layers, dependencies, dependents, hotspots")
+    p.add_argument("module")
+    p.add_argument("--types", type=int, default=10, help="how many most connected types to list")
+    p.add_argument("--users", type=int, default=20, help="how many dependent modules to detail")
+    p.add_argument("--max-bytes", type=int, default=12000)
+    p.set_defaults(fn=cmd_module)
 
     p = sub.add_parser("dead", help="symbols nothing in the indexed build reaches")
     p.add_argument("--kind", help="comma list, default: types, methods and properties")
