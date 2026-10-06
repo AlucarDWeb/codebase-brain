@@ -45,6 +45,11 @@ def folder(db, module):
                                      (module,))]
     if not rels:
         return None, None, []
+    root, base = _root(rels)
+    return root, base, rels
+
+
+def _root(rels):
     common = os.path.commonpath([os.path.dirname(r) or "." for r in rels])
     if common in ("", "."):
         # Files spread across the repo (an app target with generated sources): its main folder.
@@ -55,8 +60,26 @@ def folder(db, module):
     parts = common.split("/")
     if "Sources" in parts:
         i = parts.index("Sources")
-        return "/".join(parts[:i]) or ".", "/".join(parts[:i + 1]), rels
-    return common, common, rels
+        return "/".join(parts[:i]) or ".", "/".join(parts[:i + 1])
+    return common, common
+
+
+def owners(db):
+    """{module: (owning module, its folder)}: a module whose folder sits inside another module's
+    folder (an integration or interface target beside a feature) is reported as that one."""
+    rels = {}
+    for mod, rel in db.execute("""SELECT module, rel FROM files WHERE in_repo = 1 AND rel IS NOT NULL
+                                  AND module IS NOT NULL AND module != ''"""):
+        rels.setdefault(mod, []).append(rel)
+    roots = {m: _root(r)[0] for m, r in rels.items()}
+    out = {}
+    for m, r in roots.items():
+        best = m
+        for o, ro in roots.items():
+            if ro not in (".", "") and r.startswith(ro + "/") and len(ro) < len(roots[best]):
+                best = o
+        out[m] = (best, roots[best])
+    return out
 
 
 def layers(rels, base):
@@ -68,9 +91,9 @@ def layers(rels, base):
     return sorted(out.items(), key=lambda kv: -kv[1])
 
 
-def type_ranking(db, module):
-    """Per type: distinct symbols outside it that it uses and that use it, with its extensions'
-    and members' edges folded in. A temporary table keeps the member test indexed."""
+def _members(db, module):
+    """temp.card_mem(t, m): each type of the module, its extensions and, recursively, their
+    members. A temporary table keeps the member test indexed."""
     db.execute("DROP TABLE IF EXISTS temp.card_mem")
     db.execute("CREATE TEMP TABLE card_mem(t INTEGER, m INTEGER, PRIMARY KEY(t, m))")
     db.execute(f"""INSERT OR IGNORE INTO temp.card_mem
@@ -82,6 +105,105 @@ def type_ranking(db, module):
                       UNION SELECT mem.t, e.dst FROM mem JOIN edges e ON e.src = mem.m AND e.kind = 'CONTAINS')
         SELECT t, m FROM mem""", (module,) + TYPE_KINDS)
     db.execute("CREATE INDEX temp.ix_card_mem_m ON card_mem(m)")
+
+
+def type_users(db, module):
+    """[{h, name, kind, rel, line, users: {user module: uses}, sites: {user module: (rel, line)}}]
+    for every type of the module; a use of a member, or of a member of an extension, counts for
+    its type, and the site is the first use by file and line."""
+    _members(db, module)
+    skip = ",".join("?" * len(STRUCTURAL))
+    users, sites = {}, {}
+    for t, mod, n, site in db.execute(f"""SELECT c.t, s.module, COUNT(*), MIN(f.rel || ':' || printf('%08d', e.line))
+            FROM temp.card_mem c JOIN edges e ON e.dst = c.m AND e.kind NOT IN ({skip})
+            JOIN symbols s ON s.usr_hash = e.src LEFT JOIN files f ON f.path_hash = e.path_hash
+            WHERE s.module IS NOT NULL AND s.module != '' AND s.module != ? GROUP BY c.t, s.module""",
+                                      STRUCTURAL + (module,)):
+        users.setdefault(t, {})[mod] = n
+        sites.setdefault(t, {})[mod] = _site(site)
+    rows = db.execute(f"""SELECT s.usr_hash, s.name, s.kind, f.rel, s.def_line FROM symbols s
+                          LEFT JOIN files f ON f.path_hash = s.def_path_hash
+                          WHERE s.module = ? AND s.in_repo = 1 AND s.kind IN ({",".join("?" * len(TYPE_KINDS))})""",
+                       (module,) + TYPE_KINDS).fetchall()
+    db.execute("DROP TABLE temp.card_mem")
+    return [dict(h=r[0], name=r[1], kind=r[2], rel=r[3], line=r[4], users=users.get(r[0], {}),
+                 sites=sites.get(r[0], {})) for r in rows]
+
+
+def _site(packed):
+    """(rel, line) from 'rel:00000042', the zero padding making MIN pick the first line."""
+    if not packed:
+        return None
+    rel, _, line = packed.rpartition(":")
+    return rel, int(line)
+
+
+def top_aliases(db, module):
+    """Typealiases declared outside any type, each with {user module: uses} and sites; a nested
+    alias is a member of its type and already counts there."""
+    skip = ",".join("?" * len(STRUCTURAL))
+    out = []
+    for h, name, rel, line in db.execute("""SELECT s.usr_hash, s.name, f.rel, s.def_line FROM symbols s
+            LEFT JOIN files f ON f.path_hash = s.def_path_hash
+            WHERE s.module = ? AND s.in_repo = 1 AND s.kind = 'TypeAlias'
+            AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.dst = s.usr_hash AND e.kind = 'CONTAINS')
+            ORDER BY f.rel, s.def_line""", (module,)).fetchall():
+        users, sites = {}, {}
+        for mod, n, site in db.execute(f"""SELECT s.module, COUNT(*), MIN(f.rel || ':' || printf('%08d', e.line))
+                FROM edges e JOIN symbols s ON s.usr_hash = e.src LEFT JOIN files f ON f.path_hash = e.path_hash
+                WHERE e.dst = ? AND e.kind NOT IN ({skip}) AND s.module IS NOT NULL AND s.module != ''
+                AND s.module != ? GROUP BY s.module""", (h,) + STRUCTURAL + (module,)):
+            users[mod], sites[mod] = n, _site(site)
+        out.append(dict(h=h, name=name, kind="TypeAlias", rel=rel, line=line, users=users, sites=sites))
+    return out
+
+
+def namesakes(db, module):
+    """{type name: [other modules]} for the module's top-level types whose name a type or alias in
+    another module also has, which a text search cannot tell apart."""
+    kinds = TYPE_KINDS + ("TypeAlias",)
+    marks = ",".join("?" * len(kinds))
+    out = {}
+    for name, other in db.execute(f"""SELECT DISTINCT s.name, o.module FROM symbols s
+            JOIN symbols o ON o.name = s.name AND o.module != s.module AND o.in_repo = 1 AND o.kind IN ({marks})
+            WHERE s.module = ? AND s.in_repo = 1 AND s.kind IN ({",".join("?" * len(TYPE_KINDS))})
+            AND NOT EXISTS (SELECT 1 FROM edges e JOIN symbols p ON p.usr_hash = e.src
+                            WHERE e.dst = s.usr_hash AND e.kind = 'CONTAINS' AND p.kind != 'Extension')
+            ORDER BY s.name, o.module""", kinds + (module,) + TYPE_KINDS):
+        out.setdefault(name, []).append(other)
+    return out
+
+
+def importers(db, root, module, mod_root):
+    """(files outside the module's folder that import it, the subset with index records, the
+    indexed ones that use none of its symbols)."""
+    word = re.escape(module)
+    pats = [r"^[[:space:]]*(@[A-Za-z_]+(\([^)]*\))?[[:space:]]+)*import[[:space:]]+"
+            r"((class|struct|enum|protocol|func|typealias|var|let)[[:space:]]+)?" + word + r"([.[:space:]]|$)",
+            r"^[[:space:]]*@import[[:space:]]+" + word + r"([.;[:space:]]|$)",
+            r"^[[:space:]]*#(import|include)[[:space:]]+<" + word + "/"]
+    args = ["git", "-C", root, "grep", "-l", "-I", "-E"]
+    for pat in pats:
+        args += ["-e", pat]
+    res = subprocess.run(args, capture_output=True, text=True)
+    files = sorted(p for p in res.stdout.splitlines()
+                   if p.endswith(SOURCE_EXT) and not p.startswith(mod_root + "/"))
+    indexed, unused = [], []
+    for rel in files:
+        row = db.execute("SELECT path_hash FROM files WHERE rel = ? AND in_repo = 1", (rel,)).fetchone()
+        if not row:
+            continue
+        indexed.append(rel)
+        if not db.execute("""SELECT 1 FROM occurrences o JOIN symbols s ON s.usr_hash = o.usr_hash
+                             WHERE o.path_hash = ? AND s.module = ? LIMIT 1""", (row[0], module)).fetchone():
+            unused.append(rel)
+    return files, indexed, unused
+
+
+def type_ranking(db, module):
+    """Per type: distinct symbols outside it that it uses and that use it, with its extensions'
+    and members' edges folded in."""
+    _members(db, module)
     skip = ",".join("?" * len(STRUCTURAL))
     rows = db.execute(f"""
         WITH ext(t, other, inbound) AS (

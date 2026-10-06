@@ -703,6 +703,11 @@ def cmd_module(a):
         raise SystemExit(f"no module named {a.module!r} in the graph" + (f"; close: {', '.join(near)}" if near else ""))
     mod_root, base, rels = modulecard.folder(db, mod)
     ranking = modulecard.type_ranking(db, mod)
+    by_type = modulecard.type_users(db, mod)
+    aliases = modulecard.top_aliases(db, mod)
+    namesakes = modulecard.namesakes(db, mod)
+    owners = modulecard.owners(db)
+    root_of = {o: r for o, r in owners.values()}
     deps = modulecard.depends_on(db, mod)
     users = modulecard.used_by(db, mod)
     known = set(modulecard.modules(db))
@@ -714,7 +719,22 @@ def cmd_module(a):
     sibling_names = {s for s, _ in siblings}
     under = [r[0] for r in db.execute("SELECT rel FROM files WHERE in_repo = 1 AND rel GLOB ?", (mod_root + "/*",))]
     tracked, covered = modulecard.coverage(root, mod_root, under)
+    importing, importing_indexed, import_only = modulecard.importers(db, root, mod, mod_root)
     symbols = db.execute("SELECT COUNT(*) FROM symbols WHERE module = ? AND in_repo = 1", (mod,)).fetchone()[0]
+    basenames = {}
+    for (r,) in db.execute("SELECT rel FROM files WHERE in_repo = 1 AND rel IS NOT NULL"):
+        b = os.path.basename(r)
+        basenames[b] = basenames.get(b, 0) + 1
+
+    def short_site(site, owner_root):
+        """A file name when it is unique in the repo, else the path inside the owner's folder."""
+        rel_path, line = site
+        b = os.path.basename(rel_path)
+        if basenames.get(b) == 1:
+            return f"{b}:{line}"
+        if owner_root and rel_path.startswith(owner_root + "/"):
+            return f"{rel_path[len(owner_root) + 1:]}:{line}"
+        return f"{rel_path}:{line}"
 
     def layer_of(rel):
         sub = rel[len(base) + 1:] if rel and base and rel.startswith(base + "/") else (rel or "")
@@ -724,6 +744,38 @@ def cmd_module(a):
     for k, v in users.items():
         key = "folder" if k in sibling_names else "tests" if modulecard.is_test(k) else "outside"
         groups[key][k] = v
+
+    def type_groups(t):
+        """{folder above the using module: {using module: first site}}: a module inside another's
+        folder counts as that one, test modules go under 'tests' and this module's neighbours in
+        its own folder under 'same folder'."""
+        out = {}
+        for user in t["users"]:
+            owner, owner_root = owners.get(user, (user, user))
+            if modulecard.is_test(user):
+                key, name = "tests", user
+            elif owner == mod or user in sibling_names:
+                key, name = "same folder", user
+            else:
+                key, name = os.path.dirname(owner_root) or owner_root, owner
+            group = out.setdefault(key, {})
+            site = t["sites"].get(user)
+            if name not in group or (site and (group[name] is None or site < group[name])):
+                group[name] = site
+        return out
+
+    def group_text(t):
+        found = dict(t["groups"])
+        tests = len(found.pop("tests", {}))
+        parts = []
+        for g, v in sorted(found.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+            names = [f"{n} ({short_site(site, root_of.get(n))})" if site else n for n, site in sorted(v.items())]
+            parts.append(f"{g} {len(v)}: {', '.join(names[:30])}" + (" ..." if len(v) > 30 else ""))
+        return "; ".join(parts) + (f"; tests {tests}" if tests else "")
+    for t in by_type + aliases:
+        t["groups"] = type_groups(t)
+        t["outside"] = sum(len(v) for g, v in t["groups"].items() if g != "tests")
+    by_type.sort(key=lambda t: (-t["outside"], -len(t["groups"].get("tests", ())), t["name"]))
     if getattr(a, "json", False):
         print(json.dumps({"module": mod, "root": mod_root, "files": len(rels), "symbols": symbols,
                           "coverage": {"tracked": tracked, "indexed": covered},
@@ -732,7 +784,15 @@ def cmd_module(a):
                           "imported_unused": unused_imports,
                           "used_by": {g: {k: [dict(symbol=n, kind=kd, uses=c, site=st) for n, kd, c, st in v[:5]]
                                           for k, v in mods.items()} for g, mods in groups.items()},
-                          "types": ranking[:a.types]}, indent=1))
+                          "types": ranking[:a.types],
+                          "type_users": [dict(type=t["name"], kind=t["kind"], file=t["rel"], line=t["line"],
+                                              used_by={g: {n: f"{st[0]}:{st[1]}" if st else None for n, st in v.items()}
+                                                       for g, v in t["groups"].items()})
+                                         for t in by_type + aliases],
+                          "same_name_elsewhere": namesakes,
+                          "importers": {"files": len(importing), "compiled": len(importing_indexed),
+                                        "never_compiled": sorted(set(importing) - set(importing_indexed)),
+                                        "import_only": import_only}}, indent=1))
         return
     out = [f"{mod}  {mod_root}  {len(rels)} source files, {symbols:,} symbols"]
     if siblings:
@@ -763,14 +823,61 @@ def cmd_module(a):
         if groups[label]:
             out.append(f"  {'same folder' if label == 'folder' else 'tests'}: "
                        + ", ".join(f"{k} ({total(v)})" for k, v in sorted(groups[label].items(), key=lambda kv: -total(kv[1]))))
+    if importing:
+        prod = [f for f in importing if not usage.is_test(f)]
+        never = sorted(set(importing) - set(importing_indexed), key=lambda f: (usage.is_test(f), f))
+        out.append(f"  imported by {len(importing)} source files outside its folder ({len(prod)} production, "
+                   f"{len(importing) - len(prod)} tests); {len(importing_indexed)} of them compiled")
+        if never:
+            out += textwrap.wrap(f"never compiled, so what they use is unknown ({len(never)}): "
+                                 + ", ".join(never[:12]) + (" ..." if len(never) > 12 else ""),
+                                 110, initial_indent="    ", subsequent_indent="      ")
+        only = [f for f in import_only if not usage.is_test(f)]
+        if only:
+            out += textwrap.wrap(f"compiled production files that import it and use none of its symbols ({len(only)}): "
+                                 + ", ".join(os.path.basename(f) for f in only[:15]) + (" ..." if len(only) > 15 else ""),
+                                 110, initial_indent="    ", subsequent_indent="      ")
     out += ["", "most connected types (distinct symbols that use it / that it uses; members and extensions "
                 "folded in, structural edges ignored):"]
     for i, t in enumerate(ranking[:a.types], 1):
         out.append(f"  {i:>2}. {t['name']:<40} {t['kind']:<8} used by {t['used_by']:>4}  uses {t['uses']:>4}  {layer_of(t['rel'])}")
+    used_types = [t for t in by_type if t["outside"]]
+    cap = getattr(a, "type_users", 30)
+    out += ["", f"types other modules use: {len(used_types)} of {len(by_type)}, each with the modules that use it and "
+                "the first place each one does, grouped by the folder above them (a use of a member or an extension "
+                "counts for its type; a module inside another's folder counts as that one):"]
+    for t in used_types[:cap]:
+        where = t["rel"][len(base) + 1:] if t["rel"] and base and t["rel"].startswith(base + "/") else t["rel"]
+        name = qname(db, t["h"]).split(".", 1)[-1]
+        site = f"{where}:{t['line']}" if where else "no definition site"
+        out += textwrap.wrap(f"{name} ({t['kind']}, {site})  " + group_text(t), 110,
+                             initial_indent="  ", subsequent_indent="      ")
+    if len(used_types) > cap:
+        out.append(f"  and {len(used_types) - cap} more; raise type_users to list them")
+    for label, names in (("used outside only by tests", [t for t in by_type if not t["outside"] and t["users"]]),
+                         ("used by no other module in the compiled build", [t for t in by_type if not t["users"]])):
+        if names:
+            listed = ", ".join(qname(db, t["h"]).split(".", 1)[-1] for t in names[:40])
+            out += textwrap.wrap(f"{label} ({len(names)}): {listed}" + (" ..." if len(names) > 40 else ""),
+                                 110, initial_indent="  ", subsequent_indent="      ")
+    if aliases:
+        out += ["", f"typealiases declared outside any type ({len(aliases)}; an alias is a name, not a type, and a "
+                    "nested alias already counts for its type):"]
+        for t in aliases[:20]:
+            where = t["rel"][len(base) + 1:] if t["rel"] and base and t["rel"].startswith(base + "/") else t["rel"]
+            out += textwrap.wrap(f"{t['name']} ({where}:{t['line']})  " + (group_text(t) or "no other module uses it"),
+                                 110, initial_indent="  ", subsequent_indent="      ")
+    if namesakes:
+        listed = [f"{n} ({', '.join(v[:4])}{' ...' if len(v) > 4 else ''})" for n, v in sorted(namesakes.items())]
+        out += ["", *textwrap.wrap(f"names another module also gives a type ({len(namesakes)}); the uses above come "
+                                   "from the compiler, so they never mix these up, but a text search does: "
+                                   + ", ".join(listed[:20]) + (" ..." if len(listed) > 20 else ""),
+                                   110, subsequent_indent="  ")]
     spent = 0
     for i, line in enumerate(out):
         if spent + len(line) + 1 > a.max_bytes:
-            print(f"... {a.max_bytes:,} byte budget reached after {i} of {len(out)} lines; raise max_bytes or lower types")
+            print(f"... {a.max_bytes:,} byte budget reached after {i} of {len(out)} lines; raise max_bytes, "
+                  "or lower users or type_users")
             break
         print(line)
         spent += len(line) + 1
