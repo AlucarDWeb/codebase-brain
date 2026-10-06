@@ -11,9 +11,9 @@ the CLI stayed `idxg`.
 | File | Lines | Role |
 |---|---|---|
 | `src/idxstore.py` | 112 | ctypes bindings for `libIndexStore.dylib`: units, records, occurrences, symbol relations |
-| `src/build.py` | 545 | parallel extractor, SQLite writer, atomic swap, registry update |
+| `src/build.py` | 548 | parallel extractor, SQLite writer, atomic swap, registry update |
 | `src/project.py` | 395 | project registry, store detection, layered config, staleness |
-| `src/idxg.py` | 2137 | the CLI: every subcommand, plus the shared query helpers |
+| `src/idxg.py` | 2163 | the CLI: every subcommand, plus the shared query helpers |
 | `src/viz.py` | 2534 | HTML explorer: data slicing and the whole page as one Python string |
 | `src/serve.py` | 240 | local HTTP server behind `idxg open`: serves the explorer and answers every tab's lookups (symbols, neighbours, kinds, dead code, doc full text) from the whole db, read-only |
 | `src/deadcode.py` | 98 | dead-code candidate query and its text cross-check |

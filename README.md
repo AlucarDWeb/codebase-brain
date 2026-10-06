@@ -162,7 +162,7 @@ unwrap or a race is invisible to it.
 
 Every query command accepts `--json`, and `--db` to target another project, given as its
 folder or its graph file (`idxg projects` lists both). Symbols
-resolve by bare name, `Module.Name` or USR; an ambiguous name lists candidates unless you
+resolve by bare name, `Module.Name`, `Type.member` (or `Module.Type.member`) or USR; an ambiguous name lists candidates unless you
 pass `--first`.
 
 The code graph:
@@ -282,7 +282,7 @@ about 7 minutes the first time and 290 MB.
 | `no index store found` | Nothing has compiled the project yet. Build it, see "Set up a project". |
 | `no graph for <path>` | Run `idxg init`, or `idxg projects` to see what is registered. |
 | Coverage far below 100% | Build the missing targets, then `idxg refresh`. |
-| Several candidates for a symbol | Pass `--first`, or use `Module.Name` or the USR. |
+| Several candidates for a symbol | Pass `--first`, or qualify it as `Type.member`, `Module.Name` or the USR. |
 | Line numbers are off | The graph predates your edits. Run `idxg refresh`. |
 | `.m` files missing under Bazel | See [docs/objc-index-store.md](docs/objc-index-store.md). |
 | `no history yet` | Run `idxg history build`. |

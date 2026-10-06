@@ -59,7 +59,7 @@ TOOLS = [
      "description": "Walk resolved call/reference edges from a symbol. direction in=callers, out=callees, "
                     "both. Every edge carries the exact source location of the call site.",
      "inputSchema": {"type": "object", "properties": {
-         "symbol": {"type": "string", "description": "name, Module.Name, or USR"},
+         "symbol": {"type": "string", "description": "name, Module.Name, Type.member, Module.Type.member, or USR"},
          "direction": {"type": "string", "enum": ["in", "out", "both"], "default": "both"},
          "depth": {"type": "integer", "default": 2}, "fanout": {"type": "integer", "default": 25},
          "edge_kinds": {"type": "string", "default": "CALLS",

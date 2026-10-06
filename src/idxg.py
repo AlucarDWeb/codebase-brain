@@ -151,29 +151,55 @@ def qname(db, usr_hash, depth=6):
 
 
 def resolve(db, ident, kind=None, limit=25):
-    """Resolve a name / qualified name / USR to symbol rows."""
+    """Resolve a name, Module.name, Type.member, Module.Type.member or USR to symbol rows."""
     if ident.startswith(("s:", "c:")):
         rows = db.execute("SELECT * FROM symbols WHERE usr = ?", (ident,)).fetchall()
         if rows:
             return rows
-    name, module = ident, None
-    if "." in ident:
-        module, name = ident.rsplit(".", 1)
-    q = "SELECT * FROM symbols WHERE name = ?"
-    args = [name]
-    if module:
-        q += " AND (module = ? OR module LIKE ?)"
-        args += [module, f"%{module}%"]
-    if kind:
-        q += " AND kind IN (%s)" % ",".join("?" * len(kind.split(",")))
-        args += kind.split(",")
-    q += " ORDER BY in_repo DESC, (in_deg + out_deg) DESC LIMIT ?"
-    args.append(limit)
-    rows = db.execute(q, args).fetchall()
-    if not rows:
-        rows = db.execute("""SELECT * FROM symbols WHERE name LIKE ? ORDER BY in_repo DESC,
-                             (in_deg+out_deg) DESC LIMIT ?""", (f"{name}%", limit)).fetchall()
-    return rows
+    *quals, name = ident.split(".")
+    kinds = kind.split(",") if kind else []
+
+    def fetch(name_sql, name_arg, parent=None, module=None):
+        q, args = "SELECT s.* FROM symbols s", []
+        if parent:
+            q += (" JOIN edges e ON e.dst = s.usr_hash AND e.kind = 'CONTAINS'"
+                  " JOIN symbols p ON p.usr_hash = e.src AND p.name = ?")
+            args.append(parent)
+        q += f" WHERE s.{name_sql}"
+        args.append(name_arg)
+        if module:
+            q += " AND (s.module = ? OR s.module LIKE ?)"
+            args += [module, f"%{module}%"]
+        if kinds:
+            q += " AND s.kind IN (%s)" % ",".join("?" * len(kinds))
+            args += kinds
+        q += " GROUP BY s.usr_hash ORDER BY s.in_repo DESC, (s.in_deg + s.out_deg) DESC LIMIT ?"
+        args.append(limit)
+        return db.execute(q, args).fetchall()
+
+    names = [("name = ?", name)]
+    if "(" not in name:
+        # Swift members carry their argument labels, so a bare name stands for every overload.
+        names.append(("name GLOB ?", name + "(*"))
+    if quals:
+        # The qualifier right before the name is the enclosing type, or with nothing before it
+        # the module; dropping it would rank every same-named member of the repo instead.
+        lead = quals[0] if len(quals) > 1 and db.execute(
+            "SELECT 1 FROM symbols WHERE module = ? LIMIT 1", (quals[0],)).fetchone() else None
+        attempts = [{"parent": quals[-1], "module": lead}]
+        if len(quals) == 1:
+            attempts.append({"module": quals[0]})
+    else:
+        attempts = [{}]
+    for at in attempts:
+        for name_sql, arg in names:
+            rows = fetch(name_sql, arg, **at)
+            if rows:
+                return rows
+    if quals:
+        return []
+    return db.execute("""SELECT * FROM symbols WHERE name LIKE ? ORDER BY in_repo DESC,
+                         (in_deg+out_deg) DESC LIMIT ?""", (f"{name}%", limit)).fetchall()
 
 
 def sym_line(db, r, show_qn=True):
