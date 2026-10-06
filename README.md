@@ -136,14 +136,14 @@ there is not proof of absence.
 
 ## Why an agent is faster with it
 
-| Task | Tool calls | Tokens read from tools | Tokens processed in total | Correct |
+| Task | Tokens processed in total | Tool calls | Tokens read from tools | Correct |
 |---|---|---|---|---|
-| Crash triage | 24% fewer | 35% fewer | 34% fewer | 3/3 with, 3/3 without |
-| Module architecture | 8% fewer | 41% fewer | 20% fewer | 28/30 with, 29/30 without |
-| Impact of a protocol signature change | 41% fewer | 30% fewer | 46% fewer | 30/30 with, 30/30 without |
-| What shipped in three releases | 33% fewer | 68% fewer | 44% fewer | 28/30 with, 28/30 without |
-| Migration scope of a legacy module | 37% fewer | 40% fewer | 48% fewer | 30/30 with, 27/30 without |
-| Dead code check of 10 symbols | 60% fewer | 62% fewer | 41% fewer | 30/30 with, 30/30 without |
+| Crash triage | 34% fewer | 24% fewer | 35% fewer | 3/3 with, 3/3 without |
+| Module architecture | 20% fewer | 8% fewer | 41% fewer | 28/30 with, 29/30 without |
+| Impact of a protocol signature change | 46% fewer | 41% fewer | 30% fewer | 30/30 with, 30/30 without |
+| What shipped in three releases | 44% fewer | 33% fewer | 68% fewer | 28/30 with, 28/30 without |
+| Migration scope of a legacy module | 48% fewer | 37% fewer | 40% fewer | 30/30 with, 27/30 without |
+| Dead code check of 10 symbols | 41% fewer | 60% fewer | 62% fewer | 30/30 with, 30/30 without |
 
 What makes the difference:
 
