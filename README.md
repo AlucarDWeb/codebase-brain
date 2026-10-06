@@ -141,7 +141,7 @@ there is not proof of absence.
 | Impact of a protocol signature change | 14% fewer | 5% more | 11% fewer | 30/30 with, 30/30 without |
 | What shipped in three releases | 34% more | 30% fewer | 14% fewer | 29/30 with, 30/30 without |
 | Migration scope of a legacy module | 27% fewer | 3% more | 35% fewer | 30/30 with, 27/30 without |
-| Dead code check of 10 symbols | 5% fewer | 15% more | 53% more | 30/30 with, 30/30 without |
+| Dead code check of 10 symbols | 55% fewer | 60% fewer | 14% more | 30/30 with, 30/30 without |
 
 What makes the difference:
 
@@ -159,12 +159,14 @@ What makes the difference:
 - The graph knows which files the build never compiles, so a file that looks like a user but
   is not built is not counted: in the migration scope, all three answers with codebase-brain
   caught one such file and none of the three without did.
+- `check_usage` answers "can these symbols be deleted" for a whole list in one call, including a
+  text search of the files the index never saw, so the agent does not grep each name itself.
 - Fewer and smaller steps mean the agent re-reads less of its own conversation.
 
 Following a flow through the code still means reading that code, and costs about the same
-either way. Checking whether given symbols are unused cost more with codebase-brain, because
-the agents ran the graph lookups and then the same whole-repository text searches. A stale
-graph reverses the gain: with a graph that still held deleted files, module architecture took
+either way. Total processed counts the conversation re-read at every turn, so it follows the
+number of turns: on the dead-code check the agents without codebase-brain packed several
+searches into each turn. A stale graph reverses the gain: with a graph that still held deleted files, module architecture took
 28% more calls with codebase-brain than without it.
 
 ## Triage a crash
