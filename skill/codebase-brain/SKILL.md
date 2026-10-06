@@ -38,7 +38,7 @@ below only when the server is not connected or when a flag has no tool equivalen
 | how the project evolved, when something appeared or went away | `idxg history timeline` |
 | what the repo's own docs say (README, CLAUDE.md, design docs) | `idxg docs search`, `idxg docs list --module M` |
 | a crash report or stack trace to triage | `idxg crash <trace> --since <previous release tag>` (MCP `triage_crash`) |
-| which release first shipped a change, what is in a release | `idxg history releases`, `idxg history digest --release <tag>` (MCP `get_releases`, `get_digest` with `release`) |
+| which release first shipped a change, what is in one or more releases | `idxg history log <path> --release <tag>,<tag>` (MCP `get_history` with `release`: cut points, windows, picks, each PR's what and why), `idxg history releases`, `idxg history digest --release <tag>` |
 | code only tests keep alive | `idxg dead --test-only` (MCP `find_dead_code` with `test_only`) |
 
 ## Commands
@@ -62,6 +62,7 @@ idxg schema
 idxg history log --symbol MyReducer --limit 10        # commits touching its file
 idxg history log Modules/Feature/X/ --since 2026-01-01 --files
 idxg history log --narrate --module MyModule --limit 10   # one paragraph per commit
+idxg history log Modules/Feature/X/ --release 1.331.0,1.332.0   # per release: cut, window, each PR's why
 idxg history show '#21447'                            # PR description, files, module attribution
 idxg history digest --week 2026-W36                   # the week narrated, grouped by area
 idxg history digest --html --open                     # same, as the vault's digest page

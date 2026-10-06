@@ -965,10 +965,10 @@ def cmd_history_build(a):
         print(json.dumps({"db": path, **counts}))
 
 
-def _fmt_commit(r, web=""):
+def _fmt_commit(r, web="", release=True):
     pr = f"  #{r['pr']}" if r["pr"] else ""
     tickets = f"  [{r['tickets']}]" if r["tickets"] else ""
-    rel = f"  release {r['release']}" if "release" in r.keys() and r["release"] else ""
+    rel = f"  release {r['release']}" if release and "release" in r.keys() and r["release"] else ""
     return (f"{r['day']}  {r['short']}  {r['subject'][:100]}{pr}{tickets}\n"
             f"            {r['author']}  {r['files']} files  +{r['ins']:,} -{r['del']:,}{rel}")
 
@@ -996,9 +996,12 @@ def cmd_history_log(a):
         paths.append(path)
         note = (f"following {sym['name']} through its definition file {path}; line-level history "
                 f"is not tracked, so unrelated edits to the file appear too\n")
+    release = getattr(a, "release", None)
+    tags = [t.strip() for t in (release if isinstance(release, list) else (release or "").split(",")) if t.strip()]
+    if tags:
+        return _history_by_release(a, hist, hdb, tags, paths, note)
     rows = hist.commits_for(hdb, paths=paths or None, module=a.module, component=a.component,
-                            author=a.author, since=a.since, until=a.until, query=a.grep,
-                            release=getattr(a, "release", None), limit=a.limit)
+                            author=a.author, since=a.since, until=a.until, query=a.grep, limit=a.limit)
     m = hist.meta(hdb)
     if getattr(a, "json", False):
         out = [dict(r) for r in rows]
@@ -1011,7 +1014,7 @@ def cmd_history_log(a):
                 o["narrative"] = hist.narrate_commit(full, hist.files_of(hdb, o["sha"]), m.get("remote_web", ""), hdb)
         print(json.dumps({"branch": m.get("branch"), "head": m.get("head_sha"), "commits": out}, indent=1))
         return
-    scope = [x for x in paths + [a.module, a.component, (f"release {a.release}" if getattr(a, "release", None) else None)] if x]
+    scope = [x for x in paths + [a.module, a.component] if x]
     print(f"{m.get('branch')} @ {m.get('head_sha', '')[:11]}, built {m.get('built_at')}"
           + (f"  (scope: {', '.join(scope)})" if scope else ""))
     if note:
@@ -1046,6 +1049,84 @@ def cmd_history_log(a):
         shown += 1
     if shown == len(rows) == a.limit:
         print(f"(showing {a.limit}; raise --limit or narrow with --since, --module or a path)")
+
+
+def _history_by_release(a, hist, hdb, tags, paths, note):
+    """What first shipped in each release, oldest release first, each under the point where it
+    left the branch, and each commit with what and why from its PR description."""
+    m = hist.meta(hdb)
+    branch, web = m.get("branch"), m.get("remote_web", "")
+    windows = {t: hist.release_window(hdb, t) for t in tags}
+    missing = [t for t, w in windows.items() if not w]
+    filters = dict(paths=paths or None, module=a.module, component=a.component, author=a.author,
+                   since=a.since, until=a.until, query=a.grep, limit=a.limit)
+    groups = []
+    for w in sorted((w for w in windows.values() if w), key=lambda w: (w["cut"], w["tag"])):
+        every = hist.commits_for(hdb, release=w["tag"], **dict(filters, limit=-1))
+        earlier = [r for r in hist.commits_for(hdb, release=w["tag"], release_contains=True,
+                                               **dict(filters, limit=-1))
+                   if r["hotfix"] and r["hotfix"] != w["tag"]]
+        groups.append((dict(w, total=len(every), picked_here=sum(1 for r in every if r["hotfix"] == w["tag"])),
+                       list(reversed(every[:a.limit])), earlier))
+    if getattr(a, "json", False):
+        print(json.dumps({"branch": branch, "head": m.get("head_sha"), "missing": missing, "releases": [
+            dict(w, commits=[dict(r, why=hist.commit_why(hdb, r["sha"])) for r in rows],
+                 shipped_earlier=[dict(r) for r in earlier]) for w, rows, earlier in groups]}, indent=1))
+        return
+    scope = [x for x in paths + [a.module, a.component] if x]
+    print(f"{branch} @ {m.get('head_sha', '')[:11]}, built {m.get('built_at')}"
+          + (f"  (scope: {', '.join(scope)})" if scope else ""))
+    if note:
+        print(note.rstrip())
+    print(f"a commit first ships in the first release cut from {branch} after it was merged, or in an earlier "
+          "release whose branch received it as a cherry-pick; cut times are UTC")
+    if missing:
+        print(f"no release named {', '.join(missing)}; get_releases (idxg history releases) lists them")
+    spent, budget, done = 0, getattr(a, "max_bytes", 12000), False
+    for w, rows, earlier in groups:
+        if w["source"] == "branch":
+            state = f"release branch, not tagged, head {(w['tag_sha'] or '')[:11]}"
+        else:
+            state = f"tagged {w['tag_date']}, pointing at {(w['tag_sha'] or '')[:11]}"
+        head = [f"\n{w['tag']}: cut from {branch} at {(w['base_sha'] or '')[:11]} on {w['cut']}, {state}",
+                f"  window: merged after {w['previous']} was cut ({w['previous_cut']}) up to this cut"
+                if w["previous"] else "  window: everything merged up to this cut (no earlier release known)"]
+        head.append(f"  {w['total']} commit{'s' * (w['total'] != 1)} in scope first shipped here"
+                    + (f", {w['picked_here']} of them cherry-picked onto its branch after the cut" if w["picked_here"] else "")
+                    + (f"; {len(earlier)} more from the window shipped earlier as picks: "
+                       + ", ".join(f"#{r['pr'] or r['short']} in {r['hotfix']}" for r in earlier) if earlier else ""))
+        if not rows:
+            head.append("  (none)")
+        blocks = ["\n".join(head)]
+        for r in rows:
+            if getattr(a, "narrate", False):
+                full = hdb.execute("SELECT * FROM commits WHERE sha = ?", (r["sha"],)).fetchone()
+                block = [textwrap.fill(hist.narrate_commit(full, hist.files_of(hdb, r["sha"]), web, hdb), 100,
+                                       initial_indent="  ", subsequent_indent="  ")]
+            else:
+                block = ["  " + _fmt_commit(r, release=False).replace("\n", "\n  ")]
+                if r["hotfix"] == w["tag"]:
+                    block.append(f"              {hist.shipped(hdb, r['release'], r['hotfix'])}")
+                why = hist.commit_why(hdb, r["sha"])
+                block.append(textwrap.fill(f"why: {why}" if why else "why: no PR description or message body "
+                                           "(idxg history build fetches PR descriptions when gh is logged in)",
+                                           100, initial_indent="              ", subsequent_indent="              "))
+            if a.files:
+                for f in hist.files_of(hdb, r["sha"], 8):
+                    mod = f"  [{f['module']}]" if f["module"] else ""
+                    block.append(f"              +{f['ins']:<5} -{f['del']:<5} {f['path']}{mod}")
+            blocks.append("\n".join(block))
+        for text in blocks:
+            if spent + len(text) > budget and spent:
+                print(f"... {budget:,} byte budget reached (raise --max-bytes, or narrow with --module or a path)")
+                done = True
+                break
+            print(text)
+            spent += len(text) + 1
+        if done:
+            break
+        if w["total"] > len(rows):
+            print(f"  (showing the newest {len(rows)} of {w['total']} for {w['tag']}; raise --limit or narrow the scope)")
 
 
 def cmd_history_show(a):

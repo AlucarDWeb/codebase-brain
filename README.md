@@ -230,6 +230,7 @@ idxg history log --narrate --since 2026-09-01 # one plain paragraph per commit
 idxg history show '#1234'                     # one commit or PR in full
 idxg history digest                           # this week, grouped by area
 idxg history digest --release 1.329.0         # everything that first shipped in a release
+idxg history log Sources/Feature/ --release 1.330.0,1.331.0   # per release: cut point, PRs, what and why
 idxg history releases                         # version tags and what shipped in each
 idxg history churn --by module                # where change concentrated this year
 idxg history timeline --periods 4             # the project's story, one paragraph per period

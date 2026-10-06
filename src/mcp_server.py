@@ -178,7 +178,8 @@ TOOLS = [
                     "module, or matched an author or subject text. Each row: date, short sha, author, "
                     "subject, PR number, tickets, files and line counts. Attribution to modules follows "
                     "the compiled index, so uncompiled files have none. Pass with_files to list the "
-                    "paths each commit changed.",
+                    "paths each commit changed. With release, it answers 'what shipped in these releases': "
+                    "grouped by release with each cut point and window, every commit with its PR's what and why.",
      "inputSchema": {"type": "object", "properties": {
          "paths": {"type": "array", "items": {"type": "string"},
                    "description": "repo-relative files, directories (trailing /) or globs"},
@@ -186,7 +187,11 @@ TOOLS = [
          "module": {"type": "string"}, "component": {"type": "string", "description": "module-depth directory"},
          "author": {"type": "string"}, "since": {"type": "string", "description": "YYYY-MM-DD"},
          "until": {"type": "string"}, "query": {"type": "string", "description": "substring of subject, body or ticket"},
-         "release": {"type": "string", "description": "only commits that first shipped in this release tag"},
+         "release": {"type": "string", "description": "one or more release tags, comma-separated: what first shipped "
+                                                         "in each (a cherry-pick counts for the release it was picked "
+                                                         "onto), oldest release first, each under where it was cut from "
+                                                         "the branch, and each commit with what and why from its PR "
+                                                         "description. No get_commit or git merge-base needed after it"},
          "with_files": {"type": "boolean"},
          "narrate": {"type": "boolean", "description": "one plain paragraph per commit: who, what, why "
                                                         "(from the PR description), which files and modules"},

@@ -526,6 +526,11 @@ def _sync_releases(db, root, branch, tag_re, branch_prefixes=RELEASE_BRANCH_PREF
         return True
 
     new = [t for t in tags if have.get(t) != "tag" and add(t, t, "tag")]
+    # The tag's own date (the tagger's, for an annotated tag), not that of the commit it points at.
+    dates = dict(line.split(" ", 1) for line in git(root, "for-each-ref", "--format=%(refname:short) %(creatordate:short)",
+                                                   "refs/tags", check=False).splitlines() if " " in line)
+    db.executemany("UPDATE releases SET tag_date = ? WHERE tag = ? AND source = 'tag'",
+                   [(dates[t], t) for t in tags if t in dates])
     # Branch heads move, so their rows are rebuilt on every sync; a tag replaces its branch.
     db.execute("DELETE FROM releases WHERE source = 'branch'")
     branches = {v: hd for v, hd in _release_branches(root, branch_prefixes, tag_re).items() if v not in tags}
@@ -642,11 +647,20 @@ def pick_granularity(first_day, last_day):
     return "month"
 
 
+def first_release_sql(db):
+    """SQL for the release a commit first shipped in: the one it was cherry-picked onto, when
+    a release received it after its cut, else the first release cut after it."""
+    cols = {r[1] for r in db.execute("PRAGMA table_info(commits)")}
+    return "COALESCE(c.hotfix, c.release)" if "hotfix" in cols else "c.release"
+
+
 def commits_for(db, paths=None, module=None, component=None, author=None, since=None,
-                until=None, query=None, release=None, limit=50, after=None):
+                until=None, query=None, release=None, limit=50, after=None, release_contains=False):
+    """Commits matching every filter given, newest first. `release` keeps those that first
+    shipped in it; with `release_contains`, those whose first release cut after them is it."""
     where, args = [], []
     if release:
-        where.append("c.release = ?")
+        where.append(("c.release" if release_contains else first_release_sql(db)) + " = ?")
         args.append(release)
     join = ""
     if paths:
@@ -700,6 +714,32 @@ def releases(db, limit=None):
                                 {"(SELECT COUNT(*) FROM release_picks p WHERE p.tag = r.tag)" if picks else "0"} AS picks
                          FROM releases r ORDER BY datetime(r.base_committed) DESC, r.tag DESC""").fetchall()
     return rows[:limit] if limit else rows
+
+
+def release_window(db, tag):
+    """Where a release left the history branch (in UTC) and where the release before it did:
+    the commits merged between the two cuts first shipped in it, unless a pick shipped them
+    earlier. None for an unknown tag."""
+    cols = {r[1] for r in db.execute("PRAGMA table_info(releases)")}
+    row = db.execute(f"""SELECT tag, tag_sha, tag_date, base_sha, datetime(base_committed) cut,
+                                {"source" if "source" in cols else "'tag'"} AS source
+                         FROM releases WHERE tag = ?""", (tag,)).fetchone()
+    if not row:
+        return None
+    prev = db.execute("""SELECT tag, datetime(base_committed) FROM releases
+                         WHERE datetime(base_committed) < datetime(?)
+                         ORDER BY datetime(base_committed) DESC, tag DESC LIMIT 1""", (row["cut"],)).fetchone()
+    picks = db.execute("SELECT name FROM sqlite_master WHERE name = 'release_picks'").fetchone()
+    picked = db.execute("SELECT COUNT(*) FROM release_picks WHERE tag = ?", (tag,)).fetchone()[0] if picks else 0
+    return dict(row, previous=prev[0] if prev else None, previous_cut=prev[1] if prev else None, picked=picked)
+
+
+def commit_why(db, sha):
+    """The part of a commit's PR description (else its message body) that says what and why."""
+    cols = {r[1] for r in db.execute("PRAGMA table_info(commits)")}
+    row = db.execute(f"SELECT {'pr_body' if 'pr_body' in cols else 'NULL'}, body FROM commits WHERE sha = ?",
+                     (sha,)).fetchone()
+    return (body_digest(row[0] or "") or body_digest(row[1] or "")) if row else ""
 
 
 def pr_summary(body, limit=260):
@@ -1330,7 +1370,8 @@ def _html(text):
 def release_digest(db, tag, web=""):
     """The digest of everything that first shipped in one release: the commits whose first
     containing release is `tag`, in the weekly-digest shape."""
-    rows = db.execute("SELECT * FROM commits WHERE release = ? ORDER BY committed", (tag,)).fetchall()
+    rows = db.execute(f"SELECT * FROM commits c WHERE {first_release_sql(db)} = ? ORDER BY committed",
+                      (tag,)).fetchall()
     if not rows:
         return None
     start, end = rows[0]["day"], rows[-1]["day"]
