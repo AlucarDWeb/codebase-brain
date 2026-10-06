@@ -7,8 +7,10 @@ about, and a module imported without any symbol used is listed apart from the on
 import os, re, subprocess
 
 TYPE_KINDS = ("Class", "Struct", "Enum", "Protocol")
-# Structural edges say where a symbol lives, not who depends on it.
-STRUCTURAL = ("CONTAINS", "EXTENDS", "ACCESSOR_OF")
+# Structural edges say where a symbol lives, not who depends on it. RECEIVED_BY ties a
+# receiver type to a method called on it, and its site is the caller's (a snapshot test
+# calling a helper on a view), so it would credit the caller's dependency to the view.
+STRUCTURAL = ("CONTAINS", "EXTENDS", "ACCESSOR_OF", "RECEIVED_BY")
 TEST_HINTS = ("test", "spec", "snapshot", "mock", "fixture")
 SOURCE_EXT = (".swift", ".m", ".mm", ".h", ".c", ".cpp")
 SWIFT_IMPORT = re.compile(r"^[ \t]*(?:@\w+(?:\([^)]*\))?[ \t]+)*import[ \t]+(?:(?:class|struct|enum|protocol|func|typealias|var|let)[ \t]+)?(\w+)", re.M)
