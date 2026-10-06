@@ -231,15 +231,23 @@ def callers(db, uh, limit=5):
     return sorted(rows, key=lambda r: (is_test(r), -r["n"]))[:limit]
 
 
-def since_date(root, since):
-    """A YYYY-MM-DD as given, or the commit date of a git ref (a release tag, say)."""
+def since_point(root, since, branch="HEAD"):
+    """(day, None) for a YYYY-MM-DD, (None, time) for a git ref, (None, None) when it is neither.
+
+    A release tag sits on a release branch that left the history branch days before the tag,
+    so its own date would drop the commits merged in between, which the release does not
+    contain. The time of the fork point is the boundary that matches the release."""
     if not since:
-        return None
+        return None, None
     if re.match(r"^\d{4}-\d{2}-\d{2}$", since):
-        return since
-    out = subprocess.run(["git", "-C", root, "log", "-1", "--format=%cs", since + "^{commit}"],
+        return since, None
+    base = subprocess.run(["git", "-C", root, "merge-base", since + "^{commit}", branch],
+                          capture_output=True, text=True).stdout.strip()
+    if not base:
+        return None, None
+    out = subprocess.run(["git", "-C", root, "log", "-1", "--format=%cI", base],
                          capture_output=True, text=True)
-    return out.stdout.strip() or None
+    return None, out.stdout.strip() or None
 
 
 def is_system(frame):

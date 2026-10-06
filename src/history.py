@@ -502,8 +502,11 @@ def _sync_releases(db, root, branch, tag_re, log=print):
     # Newer than a release's branch point means not in that release; the first release
     # whose branch point is at or after the commit is the one that shipped it.
     db.execute("CREATE INDEX IF NOT EXISTS ix_rel_base ON releases(base_committed)")
-    db.execute("""UPDATE commits SET release = (SELECT tag FROM releases r WHERE r.base_committed >= commits.committed
-                                                ORDER BY r.base_committed ASC, r.tag ASC LIMIT 1)""")
+    # datetime() brings both sides to UTC: commit times carry the author's offset, release bot
+    # commits carry Z, and comparing the raw strings misplaces commits near a branch cut.
+    db.execute("""UPDATE commits SET release = (SELECT tag FROM releases r
+                                                WHERE datetime(r.base_committed) >= datetime(commits.committed)
+                                                ORDER BY datetime(r.base_committed) ASC, r.tag ASC LIMIT 1)""")
     db.commit()
     log(f"releases: {len(tags)} version tags, {len(new)} new" + (f", {len(gone)} removed" if gone else ""))
 
@@ -555,7 +558,7 @@ def pick_granularity(first_day, last_day):
 
 
 def commits_for(db, paths=None, module=None, component=None, author=None, since=None,
-                until=None, query=None, release=None, limit=50):
+                until=None, query=None, release=None, limit=50, after=None):
     where, args = [], []
     if release:
         where.append("c.release = ?")
@@ -589,6 +592,9 @@ def commits_for(db, paths=None, module=None, component=None, author=None, since=
     if until:
         where.append("c.day <= ?")
         args.append(until)
+    if after:
+        where.append("datetime(c.committed) > datetime(?)")
+        args.append(after)
     if query:
         where.append("(c.subject LIKE ? OR c.body LIKE ? OR c.tickets LIKE ?)")
         args += [f"%{query}%"] * 3

@@ -1100,9 +1100,11 @@ def cmd_crash(a):
     hist = _history_module()
     hp = hist.history_db_for(db_path(a.db))
     hdb = hist.connect(hp) if os.path.exists(hp) else None
-    since = crash.since_date(root, a.since) if a.since else None
-    if a.since and not since:
+    branch = (hist.meta(hdb).get("branch") if hdb else None) or "HEAD"
+    since_day, since_after = crash.since_point(root, a.since, branch)
+    if a.since and not (since_day or since_after):
         raise SystemExit(f"--since {a.since!r} is neither a date nor a git ref in {root}")
+    since = (f"{a.since} (commits it does not contain)" if since_after else since_day) if a.since else None
     frames = crash.parse(text)
     resolved, skipped_system, unresolved, seen = [], 0, [], set()
     for fr in frames:
@@ -1122,7 +1124,7 @@ def cmd_crash(a):
                  "trace_line": fr["line"], "resolved_by": how,
                  "callers": [dict(r) for r in crash.callers(db, sym["usr_hash"], a.callers)], "commits": []}
         if hdb and sym["rel"]:
-            rows = hist.commits_for(hdb, paths=[sym["rel"]], since=since, limit=a.commits)
+            rows = hist.commits_for(hdb, paths=[sym["rel"]], since=since_day, after=since_after, limit=a.commits)
             entry["commits"] = [dict(r) for r in rows]
         resolved.append(entry)
         if len(resolved) >= a.frames:
