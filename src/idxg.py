@@ -122,6 +122,18 @@ def literal_name_filter(pattern):
     return "s.name GLOB ?", f"*{body}*"
 
 
+def source_line(root, rel_path, line, cache):
+    """One line of a repo file with its whitespace collapsed, or '' when the file is gone."""
+    if rel_path not in cache:
+        try:
+            with open(os.path.join(root, rel_path or ""), errors="replace") as f:
+                cache[rel_path] = f.read().splitlines()
+        except OSError:
+            cache[rel_path] = []
+    lines = cache[rel_path]
+    return " ".join(lines[line - 1].split())[:110] if line and 0 < line <= len(lines) else ""
+
+
 def roles_str(mask):
     return "|".join(n for b, n in ROLE_BITS if mask & b) or str(mask)
 
@@ -459,14 +471,7 @@ def cmd_trace(a):
 
     def code_at(site):
         path, _, ln = site.rpartition(":")
-        if path not in files_seen:
-            try:
-                with open(os.path.join(code_root, path), errors="replace") as f:
-                    files_seen[path] = f.read().splitlines()
-            except OSError:
-                files_seen[path] = []
-        lines, i = files_seen[path], int(ln) - 1 if ln.isdigit() else -1
-        return " ".join(lines[i].split())[:110] if 0 <= i < len(lines) else ""
+        return source_line(code_root, path, int(ln) if ln.isdigit() else 0, files_seen)
     tree = {"symbol": qname(db, root["usr_hash"]), "usr": root["usr"], "kind": root["kind"],
             "file": rel(db, root["def_path_hash"]) if root["def_path_hash"] else None, "line": root["def_line"]}
     for d in directions:
@@ -781,6 +786,7 @@ def cmd_usage(a):
         print(json.dumps([{k: (dict(v) if k == "symbol" and v else v) for k, v in r.items()} for r in rows],
                          indent=1, default=str))
         return
+    lines_cache = {}
     for i, r in enumerate(rows, 1):
         if not r["symbol"]:
             print(f"{i}. {r['ident']}\n   NOT FOUND in the graph; check the spelling, or pass its definition site as path:line\n")
@@ -804,15 +810,20 @@ def cmd_usage(a):
                      if r["text_searched"] else "; text search skipped, the name is too common to grep"))
         shown = prod[:3] if prod else tests[:3]
         for u in shown:
-            print(f"     {u['site']}" + (f"  (through {qname(db, u['via'])})" if u["via"] else "")
+            caller = usage.enclosing(db, u)
+            print(f"     {u['site']}" + (f"  in {qname(db, caller)}" if caller else "")
+                  + (f"  (through {qname(db, u['via'])})" if u["via"] else "")
                   + ("  (implicit)" if u["implicit"] else ""))
+            code = source_line(m.get("repo_root", ""), u["rel"], u["line"], lines_cache)
+            if code:
+                print(f"         {code}")
         # Text matches are evidence only where the graph found nothing stronger.
         text = r["text_prod"] if not prod else []
         text += r["text_test"] if not prod and not r["text_prod"] and not tests else []
-        for rel, ln, kind, test in text[:3]:
-            print(f"     {rel}:{ln}  (text, {kind} file without index records{', test' if test else ''})")
+        for rel, ln, kind, test, code in text[:3]:
+            print(f"     {rel}:{ln}  (text, {kind} file without index records{', test' if test else ''})\n         {code}")
         if r["docs"]:
-            print("     mentioned in docs: " + ", ".join(f"{rel}:{ln}" for rel, ln, _, _ in r["docs"][:2]))
+            print("     mentioned in docs: " + ", ".join(f"{d[0]}:{d[1]}" for d in r["docs"][:2]))
         if r["others"]:
             print(f"   {r['others']} other symbol(s) share this name; pass the definition site as path:line to pick another")
         print()

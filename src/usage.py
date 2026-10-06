@@ -54,19 +54,28 @@ def graph_uses(db, uh):
         "SELECT e.dst FROM edges e WHERE e.src = ? AND e.kind = 'OVERRIDES'", (uh,))]
     uses = []
     for target, via in targets:
-        for r in db.execute("""SELECT o.line, o.roles, f.rel, f.module FROM occurrences o
+        for r in db.execute("""SELECT o.line, o.roles, o.path_hash, f.rel, f.module FROM occurrences o
                                LEFT JOIN files f ON f.path_hash = o.path_hash
                                WHERE o.usr_hash = ?""", (target,)):
             if r["roles"] & (R_DECL | R_DEF | R_EXTENDEDBY):
                 continue
-            uses.append({"site": f"{r['rel']}:{r['line']}", "rel": r["rel"], "test": is_test(r["rel"], r["module"]),
+            uses.append({"site": f"{r['rel']}:{r['line']}", "rel": r["rel"], "line": r["line"],
+                         "path_hash": r["path_hash"], "target": target, "test": is_test(r["rel"], r["module"]),
                          "implicit": bool(r["roles"] & R_IMPLICIT), "via": via})
     return uses
 
 
+def enclosing(db, use):
+    """The usr_hash of the symbol whose body holds a use, from the edge recorded at its site."""
+    row = db.execute("""SELECT src FROM edges WHERE dst = ? AND path_hash = ? AND line = ?
+                        AND kind IN ('CALLS', 'REFERENCES') ORDER BY kind LIMIT 1""",
+                     (use["target"], use["path_hash"], use["line"])).fetchone()
+    return row[0] if row else None
+
+
 def text_hits(root, names, indexed):
-    """{name: [(rel, line, kind, test)]} for word matches in tracked files the graph has no
-    records for, one `git grep` for all names."""
+    """{name: [(rel, line, kind, test, text)]} for word matches in tracked files the graph has
+    no records for, one `git grep` for all names."""
     names = sorted({n for n in names if n and n not in NO_TEXT})
     out = {n: [] for n in names}
     if not names:
@@ -86,7 +95,7 @@ def text_hits(root, names, indexed):
             "doc" if ext in DOC_EXT else "other"
         for n, p in pats.items():
             if p.search(text):
-                out[n].append((rel, int(ln), kind, is_test(rel)))
+                out[n].append((rel, int(ln), kind, is_test(rel), " ".join(text.split())[:110]))
     return out
 
 
