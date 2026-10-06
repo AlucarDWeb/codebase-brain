@@ -109,6 +109,8 @@ TOOLS = [
                     "defs, files(path_hash,path,rel,in_repo,module), units. Call get_schema for details.",
      "inputSchema": {"type": "object", "properties": {
          "query": {"type": "string"}, "limit": {"type": "integer", "default": 200},
+         "max_bytes": {"type": "integer", "default": 12000,
+                       "description": "cap the payload; rows past it are counted, not printed"},
          "db": DB_ARG}, "required": ["query"]}},
     {"name": "check_index_coverage",
      "description": "For each path (file or directory), report whether the compiled index covers it. "

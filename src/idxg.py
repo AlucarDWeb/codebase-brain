@@ -611,11 +611,17 @@ def cmd_sql(a):
     if not rows:
         print("(no rows)"); return
     cols = rows[0].keys()
-    widths = [max(len(c), *(len(str(r[c])) for r in rows)) for c in cols]
-    print("  ".join(c.ljust(w) for c, w in zip(cols, widths)))
-    print("  ".join("-" * w for w in widths))
-    for r in rows:
-        print("  ".join(str(r[c]).ljust(w) for c, w in zip(cols, widths)))
+    # Unpadded columns: padding every row to the widest path multiplied the payload.
+    print(" | ".join(cols))
+    spent, budget = 0, getattr(a, "max_bytes", None) or 0
+    for i, r in enumerate(rows):
+        line = " | ".join("" if r[c] is None else str(r[c]) for c in cols)
+        if budget and spent + len(line) + 1 > budget:
+            print(f"\n... {len(rows) - i} of {len(rows)} rows not printed: {budget:,} byte budget reached. "
+                  "Select fewer columns, aggregate, add a WHERE, or raise max_bytes")
+            return
+        print(line)
+        spent += len(line) + 1
     print(f"\n{len(rows)} rows")
 
 
@@ -2456,6 +2462,7 @@ def build_parser():
 
     p = sub.add_parser("sql", help="read-only SQL over the graph")
     p.add_argument("query"); p.add_argument("--limit", type=int, default=200)
+    p.add_argument("--max-bytes", type=int, default=0, help="cap the printed rows; 0 prints them all")
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_sql)
 
     p = sub.add_parser("arch", help="layers, modules, hotspots, targets")
