@@ -98,6 +98,7 @@ its own. Every tool has a CLI equivalent.
 | Was this file compiled at all | `check_index_coverage` | `idxg coverage` |
 | One module: layers, what it uses, who uses it, hotspots, coverage | `describe_module` | `idxg module` |
 | Layers, modules, cross-module hotspots | `get_architecture` | `idxg arch` |
+| Can these symbols be deleted: production, tests only, or unused, with evidence | `check_usage` | `idxg usage` |
 | Code nothing reaches, or only tests reach | `find_dead_code` | `idxg dead`, `idxg dead --test-only` |
 | Who changed this, when, in which PR, and why | `get_history` | `idxg history log --narrate` |
 | One commit or PR in full | `get_commit` | `idxg history show` |

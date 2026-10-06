@@ -51,6 +51,7 @@ CALLS = [
     ("get_architecture", {"limit": 5}),
     ("find_dead_code", {"limit": 20}),
     ("describe_module", {"module": MODULE}),
+    ("check_usage", {"symbols": [SYM, f"{SYM}.init()"]}),
     ("list_projects", {}),
     ("check_index_coverage", {"paths": ["."]}),
     ("query_graph", {"query": "SELECT kind, COUNT(*) n FROM symbols WHERE in_repo=1 "

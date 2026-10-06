@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import project as prj
 import deadcode
 import modulecard
+import usage
 
 VERSION = prj.VERSION
 
@@ -768,6 +769,57 @@ def cmd_module(a):
             break
         print(line)
         spent += len(line) + 1
+
+
+def cmd_usage(a):
+    """Whether each symbol can be deleted: its uses in the compiled build, through protocol
+    requirements it implements, and in tracked files the build never indexed."""
+    db = connect(a.db)
+    m = meta(db)
+    rows = usage.check(db, m.get("repo_root", ""), a.symbols, resolve)
+    if getattr(a, "json", False):
+        print(json.dumps([{k: (dict(v) if k == "symbol" and v else v) for k, v in r.items()} for r in rows],
+                         indent=1, default=str))
+        return
+    for i, r in enumerate(rows, 1):
+        if not r["symbol"]:
+            print(f"{i}. {r['ident']}\n   NOT FOUND in the graph; check the spelling, or pass its definition site as path:line\n")
+            continue
+        sym = r["symbol"]
+        print(f"{i}. {qname(db, sym['usr_hash'])}  {sym['kind']}  {r['def']}")
+        prod, tests = r["prod"], r["tests"]
+        files = lambda us: len({u["rel"] for u in us})
+        n = lambda count, word: f"{count} {word}{'s' * (count != 1)}"
+        if r["verdict"] == "USED IN PRODUCTION":
+            print(f"   USED IN PRODUCTION: {n(len(prod), 'use')} in {n(files(prod), 'production file')}, {len(tests)} in tests")
+        elif r["verdict"] == "USED IN PRODUCTION (text only)":
+            print("   USED IN PRODUCTION (text only): no use in the compiled build, but files the index has no "
+                  "records for name it; check they are built")
+        elif r["verdict"] == "USED ONLY BY TESTS":
+            print(f"   USED ONLY BY TESTS: {n(len(tests), 'use')} in {n(files(tests), 'test file')}"
+                  + (f", plus {len(r['text_test'])} text match(es) in unindexed test files" if r["text_test"] else ""))
+        else:
+            print("   UNUSED: no use in the compiled build"
+                  + ("; the name appears in no other tracked file outside the indexed sources"
+                     if r["text_searched"] else "; text search skipped, the name is too common to grep"))
+        shown = prod[:3] if prod else tests[:3]
+        for u in shown:
+            print(f"     {u['site']}" + (f"  (through {qname(db, u['via'])})" if u["via"] else "")
+                  + ("  (implicit)" if u["implicit"] else ""))
+        # Text matches are evidence only where the graph found nothing stronger.
+        text = r["text_prod"] if not prod else []
+        text += r["text_test"] if not prod and not r["text_prod"] and not tests else []
+        for rel, ln, kind, test in text[:3]:
+            print(f"     {rel}:{ln}  (text, {kind} file without index records{', test' if test else ''})")
+        if r["docs"]:
+            print("     mentioned in docs: " + ", ".join(f"{rel}:{ln}" for rel, ln, _, _ in r["docs"][:2]))
+        if r["others"]:
+            print(f"   {r['others']} other symbol(s) share this name; pass the definition site as path:line to pick another")
+        print()
+    cov_t, cov_c = m.get("coverage_tracked"), m.get("coverage_covered")
+    if cov_t:
+        print(f"the build indexed {int(cov_c):,} of {int(cov_t):,} tracked sources; the text search covers the rest, "
+              "but a use built from a string at runtime is invisible to both")
 
 
 def cmd_dead(a):
@@ -2087,6 +2139,10 @@ def build_parser():
     p.add_argument("--users", type=int, default=20, help="how many dependent modules to detail")
     p.add_argument("--max-bytes", type=int, default=12000)
     p.set_defaults(fn=cmd_module)
+
+    p = sub.add_parser("usage", help="can these symbols be deleted: graph uses plus a text search of unindexed files")
+    p.add_argument("symbols", nargs="+", help="Module.Type.member, Type.member, or a definition site path:line")
+    p.set_defaults(fn=cmd_usage)
 
     p = sub.add_parser("dead", help="symbols nothing in the indexed build reaches")
     p.add_argument("--kind", help="comma list, default: types, methods and properties")

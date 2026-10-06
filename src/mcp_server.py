@@ -25,11 +25,12 @@ Where to start:
 - How a module is organised, what it uses, who uses it, where a change spreads: describe_module.
 - A crash report or stack trace: triage_crash with the pasted trace and since=<previous release tag>. Per frame it gives the code, its callers and the commits that release lacks, each with the release it first shipped in (hotfix branches included) and the opening of its PR. Call get_commit only for a full PR description.
 - Who calls X, what X calls: trace_path (Type.member names work; call-site code is included). Every occurrence: find_references.
+- Whether given symbols can be deleted: check_usage with the list; it already searches the unindexed files, so do not grep again.
 - Who changed X and why: get_history with narrate. What a release shipped: get_releases, get_digest with release.
 - What the repo's own docs say: search_docs, then get_doc.
 - Anything else: query_graph with SQL, after get_schema.
 
-The graph is a snapshot of the last compile: index_status says whether it is behind and how much of the repo it covers. A file with no index records was never compiled, so search its text instead and never call code unused on the graph's word alone."""
+The graph is a snapshot of the last compile: index_status says whether it is behind and how much of the repo it covers. A file with no index records was never compiled, so search its text instead; check_usage does that search for you."""
 
 
 def recovery_hint():
@@ -130,6 +131,17 @@ TOOLS = [
          "types": {"type": "integer", "default": 10, "description": "how many most connected types to list"},
          "users": {"type": "integer", "default": 20, "description": "how many dependent modules to detail"},
          "max_bytes": {"type": "integer", "default": 12000}, "db": DB_ARG}, "required": ["module"]}},
+    {"name": "check_usage",
+     "description": "Can these symbols be deleted? For each one: USED IN PRODUCTION, USED ONLY BY TESTS or "
+                    "UNUSED, with the evidence, from its uses in the compiled build (including calls through a "
+                    "protocol requirement or base method it implements) and a text search of every tracked "
+                    "file the build did not index (Objective-C the index skipped, xibs, storyboards, plists). "
+                    "One call answers what otherwise takes a graph lookup and a repository grep per symbol; do "
+                    "not repeat the grep afterwards. A use built from a string at runtime is invisible to both.",
+     "inputSchema": {"type": "object", "properties": {
+         "symbols": {"type": "array", "items": {"type": "string"},
+                     "description": "Module.Type.member, Type.member, or a definition site path/File.swift:line"},
+         "db": DB_ARG}, "required": ["symbols"]}},
     {"name": "find_dead_code",
      "description": "Symbols nothing in the indexed build reaches: no call, no reference, no "
                     "override, no occurrence beyond their own definition. Structural edges are "
@@ -323,6 +335,8 @@ def call(name, a):
     if name == "describe_module":
         return run(idxg.cmd_module, ns(db=db, module=a["module"], types=a.get("types", 10), users=a.get("users", 20),
                                        max_bytes=a.get("max_bytes", 12000)))
+    if name == "check_usage":
+        return run(idxg.cmd_usage, ns(db=db, symbols=a["symbols"]))
     if name == "find_dead_code":
         return run(idxg.cmd_dead, ns(db=db, module=a.get("module"), kind=a.get("kind"),
                                      verify=bool(a.get("verify")), test_only=bool(a.get("test_only")),

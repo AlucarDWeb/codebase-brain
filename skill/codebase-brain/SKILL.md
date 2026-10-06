@@ -27,6 +27,7 @@ below only when the server is not connected or when a flag has no tool equivalen
 | find a symbol, filter by kind/module/file/degree | `idxg search` |
 | module-level coupling, layer counts, hotspots | `idxg arch` |
 | anything expressible as SQL over symbols/edges | `idxg sql` |
+| can these specific symbols be deleted | `idxg usage <symbols...>` (MCP `check_usage`); it greps the unindexed files itself |
 | unused code, dead-code candidates | `idxg dead --verify` |
 | literal text, comments, strings, uncompiled files | ripgrep |
 | files the compiled build never touched | `idxg coverage` first, then ripgrep |
@@ -222,7 +223,7 @@ Treat the output as the list of places and pull requests to read first.
 
 ## MCP
 
-Tools: `index_status`, `describe_module`, `search_graph`, `trace_path`, `find_references`,
+Tools: `index_status`, `describe_module`, `check_usage`, `search_graph`, `trace_path`, `find_references`,
 `get_code_snippet`, `query_graph`, `check_index_coverage`, `get_architecture`,
 `get_schema`, `build_visualizer`; history and docs: `get_history`, `get_commit`,
 `get_churn`, `get_timeline`, `get_digest`, `get_releases`, `list_docs`, `search_docs`,
