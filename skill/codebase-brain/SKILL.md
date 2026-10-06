@@ -21,13 +21,14 @@ below only when the server is not connected or when a flag has no tool equivalen
 
 | Question | Use |
 |---|---|
-| how a module is organised, what it uses, who uses it and through what, where change spreads | `idxg module <Name>` (MCP `describe_module`) |
+| how a module is organised, what it uses, who uses it and through what, where change spreads, which modules use each of its types (scope of a move) | `idxg module <Name>` (MCP `describe_module`) |
 | who calls / what calls this, override or conformance chains | `idxg trace --code` (MCP `trace_path`, code on by default) |
 | every use of a symbol, with read/write/call roles | `idxg refs` |
 | find a symbol, filter by kind/module/file/degree | `idxg search` |
 | module-level coupling, layer counts, hotspots | `idxg arch` |
 | anything expressible as SQL over symbols/edges | `idxg sql` |
-| can these specific symbols be deleted | `idxg usage <symbols...>` (MCP `check_usage`); it greps the unindexed files itself |
+| what a signature change to a method or property breaks | `idxg impact Type.member` (MCP `impact_of`); implementations, call sites, protocol extension helpers, and uncompiled files as text |
+| can these specific symbols be deleted | `idxg usage <symbols...>` (MCP `check_usage`); it greps the unindexed files itself and prints the code at each use |
 | unused code, dead-code candidates | `idxg dead --verify` |
 | literal text, comments, strings, uncompiled files | ripgrep |
 | files the compiled build never touched | `idxg coverage` first, then ripgrep |
@@ -54,6 +55,9 @@ idxg refs MyType
 idxg snippet MyType
 idxg sql "SELECT kind, COUNT(*) n FROM symbols WHERE in_repo=1 GROUP BY kind ORDER BY n DESC"
 idxg arch
+idxg module MyModule                    # card: layers, deps, dependents, who uses each type
+idxg impact MyProtocol.requirement      # what a signature change breaks
+idxg usage MyModule.MyType.member       # can it be deleted, with the code at each use
 idxg dead --verify --module MyModule
 idxg coverage Sources/Feature SomeFile.swift
 idxg viz --scope MyModule --open
@@ -224,7 +228,7 @@ Treat the output as the list of places and pull requests to read first.
 
 ## MCP
 
-Tools: `index_status`, `describe_module`, `check_usage`, `search_graph`, `trace_path`, `find_references`,
+Tools: `index_status`, `describe_module`, `impact_of`, `check_usage`, `search_graph`, `trace_path`, `find_references`,
 `get_code_snippet`, `query_graph`, `check_index_coverage`, `get_architecture`,
 `get_schema`, `build_visualizer`; history and docs: `get_history`, `get_commit`,
 `get_churn`, `get_timeline`, `get_digest`, `get_releases`, `list_docs`, `search_docs`,

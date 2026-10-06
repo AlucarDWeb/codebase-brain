@@ -5,6 +5,7 @@ import argparse, json, os, re, shutil, sqlite3, subprocess, sys, textwrap
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import project as prj
 import deadcode
+import impact
 import modulecard
 import usage
 
@@ -938,6 +939,146 @@ def cmd_usage(a):
     if cov_t:
         print(f"the build indexed {int(cov_c):,} of {int(cov_t):,} tracked sources; the text search covers the rest, "
               "but a use built from a string at runtime is invisible to both")
+
+
+def cmd_impact(a):
+    """What a signature change to a method or property breaks: implementations and overrides,
+    calls of it or of them, the members of its protocol's extensions, and the lines of files the
+    build never compiled that name its type."""
+    db = connect(a.db)
+    m = meta(db)
+    root = m.get("repo_root", "")
+    cands = [r for r in resolve(db, a.symbol) if r["in_repo"]]
+    if not cands:
+        raise SystemExit(f"no symbol in this repo matched {a.symbol!r}; try Type.member, Module.Type.member or a USR")
+    # A type's extensions carry its name, so a bare type name matches them too.
+    if len(cands) > 1 and all(r["kind"] in modulecard.TYPE_KINDS + ("Extension",) for r in cands):
+        cands = [r for r in cands if r["kind"] != "Extension"] or cands[:1]
+    if len(cands) > 1:
+        print(f"{len(cands)} symbols match {a.symbol!r}; pass one as Module.Type.member or by USR:")
+        for r in cands[:12]:
+            print(f"  {sym_line(db, r)}\n    usr {r['usr']}")
+        return
+    sym = cands[0]
+    if sym["kind"] in modulecard.TYPE_KINDS + ("Extension",):
+        raise SystemExit(f"{a.symbol} is a {sym['kind']}; impact_of takes a method or property. For a type, "
+                         "describe_module lists who uses each type, find_references every occurrence")
+    lines_cache = {}
+    uh = sym["usr_hash"]
+    short = lambda h: qname(db, h).split(".", 1)[-1]
+    type_hash, type_row = impact.container(db, uh)
+    impls = impact.implementations(db, uh)
+    targets = [t for h in [uh] + [h for h, _ in impls] for t in impact.with_accessors(db, h)]
+    calls, refs = impact.sites(db, targets)
+    call_keys = {(c["rel"], c["line"]) for c in calls}
+    refs = [r for r in refs if (r["rel"], r["line"]) not in call_keys]
+    helpers = impact.extension_members(db, type_hash, set(targets)) \
+        if type_row is not None and type_row["kind"] == "Protocol" else []
+    text, docs = impact.unindexed_text(root, db, type_row["name"] if type_row is not None else None,
+                                       impact.bare(sym["name"]))
+    def_rel = rel(db, sym["def_path_hash"]) if sym["def_path_hash"] else None
+    if getattr(a, "json", False):
+        info = lambda h: dict(symbol=qname(db, h), file=rel(db, db.execute(
+            "SELECT def_path_hash FROM symbols WHERE usr_hash = ?", (h,)).fetchone()[0] or 0))
+        print(json.dumps({"symbol": qname(db, uh), "usr": sym["usr"], "file": def_rel, "line": sym["def_line"],
+                          "implements": [qname(db, h) for h in impact.implements(db, uh)],
+                          "implementations": [dict(info(h), level=lv) for h, lv in impls],
+                          "calls": [dict(c, caller=qname(db, c["caller"]), target=qname(db, c["target"])) for c in calls],
+                          "references": [dict(r, caller=qname(db, r["caller"]), target=qname(db, r["target"])) for r in refs],
+                          "extension_members": [dict(h, h=None, symbol=qname(db, h["h"])) for h in helpers],
+                          "unindexed_text": {k: [list(x) for x in v] for k, v in text.items()}, "docs": docs},
+                         indent=1, default=str))
+        return
+
+    out = [f"{qname(db, uh)}  {sym['kind']}  {def_rel}:{sym['def_line']}" if def_rel else
+           f"{qname(db, uh)}  {sym['kind']}  (no definition site in the index)"]
+    decl = source_line(root, def_rel, sym["def_line"], lines_cache) if def_rel else ""
+    if decl:
+        out.append(f"    {decl}")
+    if type_row is not None and type_row["kind"] == "Protocol":
+        out.append(f"  a requirement of protocol {type_row['name']}: every implementation below changes with it")
+    for req in impact.implements(db, uh):
+        out.append(f"  it implements {qname(db, req)}; a signature change breaks that conformance, so run "
+                   f"impact_of on the requirement for the whole picture")
+
+    def listing(items, fmt):
+        """Items grouped by module, production first, up to max_rows; the rest as counts per module."""
+        groups = {}
+        for it in items:
+            groups.setdefault((it["test"], it["module"] or "(no module)"), []).append(it)
+        lines, shown, rest = [], 0, {}
+        for (test, mod), group in sorted(groups.items()):
+            for i, it in enumerate(group):
+                if shown >= a.max_rows:
+                    rest[mod] = len(group) - i
+                    break
+                if i == 0:
+                    lines.append(f"  {mod}" + ("  (tests)" if test else ""))
+                lines += fmt(it)
+                shown += 1
+        if rest:
+            summary = ", ".join(f"{k} {v}" for k, v in sorted(rest.items(), key=lambda kv: -kv[1]))
+            lines += textwrap.wrap(f"... and {sum(rest.values())} more in {len(rest)} modules: {summary} (raise max_rows "
+                                   "to list them)", 110, initial_indent="  ", subsequent_indent="      ")
+        return lines
+
+    rows = []
+    for h, level in impls:
+        s = db.execute("SELECT * FROM symbols WHERE usr_hash = ?", (h,)).fetchone()
+        r_ = rel(db, s["def_path_hash"]) if s["def_path_hash"] else ""
+        rows.append(dict(h=h, level=level, module=s["module"], rel=r_, line=s["def_line"], test=usage.is_test(r_, s["module"])))
+    prod = sum(1 for r in rows if not r["test"])
+    out += ["", f"implementations and overrides: {len(rows)} in the compiled build ({prod} production, "
+                f"{len(rows) - prod} tests)" + (":" if rows else "")]
+    out += listing(rows, lambda r: [f"    {short(r['h'])}  {r['rel']}:{r['line']}"
+                                    + (f"  (overrides an override, level {r['level']})" if r["level"] > 1 else "")])
+
+    def site(c, verb):
+        what = "the requirement" if c["target"] == uh and type_row is not None and type_row["kind"] == "Protocol" \
+            else "it" if c["target"] == uh else short(c["target"])
+        code = source_line(root, c["rel"], c["line"], lines_cache)
+        return [f"    {c['rel']}:{c['line']}  in {short(c['caller'])}  {verb} {what}"] + ([f"        {code}"] if code else [])
+
+    prod = sum(1 for c in calls if not c["test"])
+    out += ["", f"call sites of it or of an implementation: {len(calls)} in the compiled build ({prod} production, "
+                f"{len(calls) - prod} tests)" + (":" if calls else "")]
+    out += listing(calls, lambda c: site(c, "calls"))
+    if refs:
+        out += ["", f"referenced without a call ({len(refs)}: passed as a value, a key path or a selector):"]
+        out += listing(refs, lambda c: site(c, "references"))
+    if helpers:
+        out += ["", f"other members of extensions of {type_row['name']} (helpers that may forward to it or repeat its "
+                    f"parameters):"]
+        for h in helpers:
+            where = f"{h['rel']}:{h['line']}" if h["rel"] else "no definition site"
+            does = f"calls it at line{'s' * (len(h['calls']) > 1)} {', '.join(map(str, h['calls']))}" if h["calls"] \
+                else "no call to it"
+            out.append(f"  {h['name']}  {h['kind']}  {where}  {does}")
+    label = type_row["name"] if type_row is not None else impact.bare(sym["name"])
+    if text:
+        out += ["", f"tracked files the build never compiled that name {label} (text matches, not resolved; read "
+                    f"each line):"]
+        for path, hits in sorted(text.items()):
+            out.append(f"  {path}" + ("  (test)" if usage.is_test(path) else ""))
+            for ln, what, code in hits[:12]:
+                out.append(f"    {ln:>5}  {what:<24} {code}")
+            if len(hits) > 12:
+                out.append(f"    ... {len(hits) - 12} more lines in this file")
+    else:
+        out += ["", f"no tracked file outside the compiled build names {label}"]
+    if docs:
+        out.append(f"  docs naming {label}: " + ", ".join(docs[:6]) + (" ..." if len(docs) > 6 else ""))
+    cov_t, cov_c = m.get("coverage_tracked"), m.get("coverage_covered")
+    if cov_t:
+        out.append(f"\nthe build indexed {int(cov_c):,} of {int(cov_t):,} tracked sources; the text search covers the "
+                   "rest, but a call built from a string at runtime is invisible to both")
+    spent = 0
+    for i, line in enumerate(out):
+        if spent + len(line) + 1 > a.max_bytes:
+            print(f"... {a.max_bytes:,} byte budget reached after {i} of {len(out)} lines; raise max_bytes or max_rows")
+            break
+        print(line)
+        spent += len(line) + 1
 
 
 def cmd_dead(a):
@@ -2336,12 +2477,19 @@ def build_parser():
     p.add_argument("module")
     p.add_argument("--types", type=int, default=10, help="how many most connected types to list")
     p.add_argument("--users", type=int, default=20, help="how many dependent modules to detail")
-    p.add_argument("--max-bytes", type=int, default=12000)
+    p.add_argument("--type-users", type=int, default=30, help="how many used types to list with their users")
+    p.add_argument("--max-bytes", type=int, default=24000)
     p.set_defaults(fn=cmd_module)
 
     p = sub.add_parser("usage", help="can these symbols be deleted: graph uses plus a text search of unindexed files")
     p.add_argument("symbols", nargs="+", help="Module.Type.member, Type.member, or a definition site path:line")
     p.set_defaults(fn=cmd_usage)
+
+    p = sub.add_parser("impact", help="what a signature change to a method or property breaks")
+    p.add_argument("symbol", help="Type.member, Module.Type.member or a USR")
+    p.add_argument("--max-rows", type=int, default=40, help="cap the rows of each list; the rest are counted per module")
+    p.add_argument("--max-bytes", type=int, default=12000)
+    p.set_defaults(fn=cmd_impact)
 
     p = sub.add_parser("dead", help="symbols nothing in the indexed build reaches")
     p.add_argument("--kind", help="comma list, default: types, methods and properties")

@@ -12,17 +12,18 @@ the CLI stayed `idxg`.
 |---|---|---|
 | `src/idxstore.py` | 112 | ctypes bindings for `libIndexStore.dylib`: units, records, occurrences, symbol relations |
 | `src/build.py` | 574 | parallel extractor, SQLite writer, atomic swap, registry update |
-| `src/project.py` | 395 | project registry, store detection, layered config, staleness |
-| `src/idxg.py` | 2346 | the CLI: every subcommand, plus the shared query helpers |
+| `src/project.py` | 397 | project registry, store detection, layered config, staleness |
+| `src/idxg.py` | 2700 | the CLI: every subcommand, plus the shared query helpers |
 | `src/viz.py` | 2534 | HTML explorer: data slicing and the whole page as one Python string |
 | `src/serve.py` | 240 | local HTTP server behind `idxg open`: serves the explorer and answers every tab's lookups (symbols, neighbours, kinds, dead code, doc full text) from the whole db, read-only |
-| `src/deadcode.py` | 98 | dead-code candidate query and its text cross-check |
-| `src/modulecard.py` | 142 | `describe_module`: a module's folder and layers, used and imported-only dependencies, dependents with the symbols they use, type connectivity ranking, coverage |
-| `src/usage.py` | 131 | `check_usage`: per symbol, graph uses (and uses through implemented requirements) split production/tests, plus `git grep` over tracked files the build never indexed, into one verdict |
-| `src/history.py` | 1745 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; releases from tags and `release/<version>` branches, hotfix picks by patch id; per-commit narration, weekly digest, timeline, vault export |
+| `src/deadcode.py` | 132 | dead-code candidate query and its text cross-check |
+| `src/modulecard.py` | 264 | `describe_module`: a module's folder and layers, used and imported-only dependencies, dependents with the symbols they use, type connectivity ranking, coverage, the files that import it, and per type the modules that use it with a first site (an integration target counted as the module whose folder holds it), top-level typealiases, and type names other modules share |
+| `src/usage.py` | 140 | `check_usage`: per symbol, graph uses (and uses through implemented requirements) split production/tests, plus `git grep` over tracked files the build never indexed, into one verdict; each use shown with its enclosing symbol and line of code |
+| `src/impact.py` | 133 | `impact_of`: a member's implementations and overrides, calls of it or of them, other members of its protocol's extensions, and the matching lines of tracked files the build never compiled that name its type |
+| `src/history.py` | 1781 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; releases from tags and `release/<version>` branches, hotfix picks by patch id; per-commit narration, weekly digest, timeline, vault export |
 | `src/crash.py` | 260 | stack trace parsing (Apple, lldb, Sentry, free text), frame resolution by file:line (checked against the frame's function name) or by typed name, callers, the fork point of a `--since` ref |
 | `src/templates/weekly-digest.html` | | the knowledge vault's fixed digest layout, copied verbatim; only `{{TITLE}}` and `{{DIGEST_JSON}}` are substituted |
-| `src/mcp_server.py` | 445 | stdio MCP server wrapping the CLI functions, with start-up `INSTRUCTIONS` that tell an agent where to begin |
+| `src/mcp_server.py` | 477 | stdio MCP server wrapping the CLI functions, with start-up `INSTRUCTIONS` that tell an agent where to begin |
 | `bench/bench_mcp.py` | | latency and payload size per MCP tool |
 | `tests/smoke.py` | | every module parses and imports, and the MCP server lists its tools; CI runs it on 3.9 and the latest Python |
 

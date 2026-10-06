@@ -96,14 +96,16 @@ its own. Every tool has a CLI equivalent.
 | Every use of a symbol, with read, write and call roles | `find_references` | `idxg refs` |
 | Read a definition from disk | `get_code_snippet` | `idxg snippet` |
 | Was this file compiled at all | `check_index_coverage` | `idxg coverage` |
-| One module: layers, what it uses, who uses it, hotspots, coverage | `describe_module` | `idxg module` |
+| One module: layers, what it uses, who uses it, hotspots, coverage, and which modules use each of its types | `describe_module` | `idxg module` |
 | Layers, modules, cross-module hotspots | `get_architecture` | `idxg arch` |
-| Can these symbols be deleted: production, tests only, or unused, with evidence | `check_usage` | `idxg usage` |
+| What a signature change to a method breaks: implementations, call sites, protocol extension helpers, uncompiled files | `impact_of` | `idxg impact` |
+| Can these symbols be deleted: production, tests only, or unused, with the code at each use | `check_usage` | `idxg usage` |
 | Code nothing reaches, or only tests reach | `find_dead_code` | `idxg dead`, `idxg dead --test-only` |
 | Who changed this, when, in which PR, and why | `get_history` | `idxg history log --narrate` |
 | One commit or PR in full | `get_commit` | `idxg history show` |
 | Where change concentrates | `get_churn` | `idxg history churn` |
-| What shipped this week, or in one release | `get_digest` | `idxg history digest` |
+| What shipped in one or more releases, with each PR's what and why | `get_history` with `release` | `idxg history log --release` |
+| What shipped this week, or in one release, narrated | `get_digest` | `idxg history digest` |
 | Release tags and what first shipped in each | `get_releases` | `idxg history releases` |
 | How the project evolved, period by period | `get_timeline` | `idxg history timeline` |
 | A crash report, frame by frame | `triage_crash` | `idxg crash` |
@@ -215,6 +217,9 @@ idxg trace MyView --kind CALLS,REFERENCES --direction out --first
 idxg refs MyType                              # every occurrence, with roles
 idxg snippet MyType                           # the definition, read from disk
 idxg arch                                     # layers, modules, hotspots
+idxg module MyModule                          # one module's card, with who uses each type
+idxg impact MyProtocol.requirement            # what a signature change breaks
+idxg usage MyModule.MyType.member OtherType   # can these be deleted
 idxg dead --verify                            # symbols nothing in the build reaches
 idxg coverage Sources/Feature                 # what the index covers under a path
 idxg sql "SELECT kind, COUNT(*) FROM symbols WHERE in_repo=1 GROUP BY kind"
@@ -350,6 +355,9 @@ A project skill with a `## Project notes` section is kept unless you pass `--for
 | `src/build.py` | parallel extractor and SQLite writer |
 | `src/history.py` | git log, PR descriptions, docs, narration, digest, timeline, vault export |
 | `src/crash.py` | stack trace parsing and frame resolution |
+| `src/modulecard.py` | the module card behind `idxg module` |
+| `src/usage.py` | the deletion check behind `idxg usage` |
+| `src/impact.py` | the signature-change check behind `idxg impact` |
 | `src/idxg.py` | the CLI and query layer |
 | `src/viz.py` | the HTML explorer |
 | `src/mcp_server.py` | the MCP server |

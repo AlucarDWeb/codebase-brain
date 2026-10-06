@@ -25,8 +25,9 @@ Where to start:
 - How a module is organised, what it uses, who uses it, where a change spreads: describe_module.
 - A crash report or stack trace: triage_crash with the pasted trace and since=<previous release tag>. Per frame it gives the code, its callers and the commits that release lacks, each with the release it first shipped in (hotfix branches included) and the opening of its PR. Call get_commit only for a full PR description.
 - Who calls X, what X calls: trace_path (Type.member names work; call-site code is included). Every occurrence: find_references.
-- Whether given symbols can be deleted: check_usage with the list; it already searches the unindexed files, so do not grep again.
-- Who changed X and why: get_history with narrate. What a release shipped: get_releases, get_digest with release.
+- What a signature change to a method or property breaks (implementations, call sites, protocol extension helpers, uncompiled files): impact_of.
+- Whether given symbols can be deleted: check_usage with the list; it prints the code at each use and already searches the unindexed files, so do not grep or open the sites again.
+- Who changed X and why: get_history with narrate. What one or more releases shipped, with each PR's what and why: get_history with release (comma-separated tags) and a path or module; get_digest with release for a narrated digest.
 - What the repo's own docs say: search_docs, then get_doc.
 - Anything else: query_graph with SQL, after get_schema.
 
@@ -124,24 +125,44 @@ TOOLS = [
      "description": "One module's card in a single call: its folder and layers with their most connected "
                     "types, the first-party modules it uses (and those it imports without using any symbol), "
                     "every module that uses it with the symbols they call and one call site, the types a "
-                    "change would spread furthest from, and how much of its folder the build compiled. "
-                    "Start here for 'how is module X organised', 'what depends on X', 'what does X need'.",
+                    "change would spread furthest from, how much of its folder the build compiled, which "
+                    "files import it (and which of those were never compiled or use nothing from it), and each "
+                    "type other modules use with the modules that use it and the first file:line where each "
+                    "does, grouped by folder (members and extensions count for their type), then the types "
+                    "only tests or nobody outside uses, its top-level typealiases with their users, and the "
+                    "type names other modules also define. "
+                    "Start here for 'how is module X organised', 'what depends on X', 'what does X need', "
+                    "and for the scope of moving or splitting X.",
      "inputSchema": {"type": "object", "properties": {
          "module": {"type": "string", "description": "module name as the compiler knows it, e.g. SearchFeature"},
          "types": {"type": "integer", "default": 10, "description": "how many most connected types to list"},
          "users": {"type": "integer", "default": 20, "description": "how many dependent modules to detail"},
-         "max_bytes": {"type": "integer", "default": 12000}, "db": DB_ARG}, "required": ["module"]}},
+         "type_users": {"type": "integer", "default": 30, "description": "how many used types to list with their users"},
+         "max_bytes": {"type": "integer", "default": 24000}, "db": DB_ARG}, "required": ["module"]}},
     {"name": "check_usage",
      "description": "Can these symbols be deleted? For each one: USED IN PRODUCTION, USED ONLY BY TESTS or "
                     "UNUSED, with the evidence, from its uses in the compiled build (including calls through a "
                     "protocol requirement or base method it implements) and a text search of every tracked "
                     "file the build did not index (Objective-C the index skipped, xibs, storyboards, plists). "
-                    "One call answers what otherwise takes a graph lookup and a repository grep per symbol; do "
-                    "not repeat the grep afterwards. A use built from a string at runtime is invisible to both.",
+                    "Each use shown carries the function it sits in and its line of code. One call answers what "
+                    "otherwise takes a graph lookup, a repository grep and a look at each site; do not repeat "
+                    "them afterwards. A use built from a string at runtime is invisible to both.",
      "inputSchema": {"type": "object", "properties": {
          "symbols": {"type": "array", "items": {"type": "string"},
                      "description": "Module.Type.member, Type.member, or a definition site path/File.swift:line"},
          "db": DB_ARG}, "required": ["symbols"]}},
+    {"name": "impact_of",
+     "description": "What a signature change to a method or property breaks, in one call: every implementation "
+                    "and override (production and tests apart, by module), every call of it or of an "
+                    "implementation with the calling function and its line of code, references that are not "
+                    "calls, the other members of its protocol's extensions with the lines where they forward "
+                    "to it, and the lines of tracked files the build never compiled that name its type, so "
+                    "uncompiled conformers and calls show too (as text). Members with the same name on other "
+                    "protocols or types are never mixed in.",
+     "inputSchema": {"type": "object", "properties": {
+         "symbol": {"type": "string", "description": "Type.member, Module.Type.member or USR, e.g. AsyncReducer.reduce"},
+         "max_rows": {"type": "integer", "default": 40, "description": "rows per list; the rest are counted per module"},
+         "max_bytes": {"type": "integer", "default": 12000}, "db": DB_ARG}, "required": ["symbol"]}},
     {"name": "find_dead_code",
      "description": "Symbols nothing in the indexed build reaches: no call, no reference, no "
                     "override, no occurrence beyond their own definition. Structural edges are "
@@ -332,16 +353,20 @@ def call(name, a):
         return run(idxg.cmd_snippet, ns(db=db, symbol=a["symbol"], max_lines=a.get("max_lines", 200),
                                         max_bytes=a.get("max_bytes", 6000)))
     if name == "query_graph":
-        return run(idxg.cmd_sql, ns(db=db, query=a["query"], limit=a.get("limit", 200)))
+        return run(idxg.cmd_sql, ns(db=db, query=a["query"], limit=a.get("limit", 200),
+                                    max_bytes=a.get("max_bytes", 12000)))
     if name == "check_index_coverage":
         return run(idxg.cmd_coverage, ns(db=db, paths=a["paths"]))
     if name == "get_architecture":
         return run(idxg.cmd_arch, ns(db=db, limit=a.get("limit", 20)))
     if name == "describe_module":
         return run(idxg.cmd_module, ns(db=db, module=a["module"], types=a.get("types", 10), users=a.get("users", 20),
-                                       max_bytes=a.get("max_bytes", 12000)))
+                                       type_users=a.get("type_users", 30), max_bytes=a.get("max_bytes", 24000)))
     if name == "check_usage":
         return run(idxg.cmd_usage, ns(db=db, symbols=a["symbols"]))
+    if name == "impact_of":
+        return run(idxg.cmd_impact, ns(db=db, symbol=a["symbol"], max_rows=a.get("max_rows", 40),
+                                       max_bytes=a.get("max_bytes", 12000)))
     if name == "find_dead_code":
         return run(idxg.cmd_dead, ns(db=db, module=a.get("module"), kind=a.get("kind"),
                                      verify=bool(a.get("verify")), test_only=bool(a.get("test_only")),

@@ -37,6 +37,27 @@ def pick_module():
 
 
 MODULE = pick_module()
+
+
+def pick_requirement():
+    """The USR of the method with the most implementations, the widest impact_of answer."""
+    db = idxg.connect(None)
+    row = db.execute("""SELECT s.usr FROM edges e JOIN symbols s ON s.usr_hash = e.dst WHERE e.kind = 'OVERRIDES'
+                        AND s.in_repo = 1 GROUP BY e.dst ORDER BY COUNT(*) DESC LIMIT 1""").fetchone()
+    db.close()
+    return row["usr"] if row else f"{SYM}.init()"
+
+
+def pick_releases():
+    hist = idxg._history_module()
+    path = hist.history_db_for(idxg.db_path(None))
+    if not os.path.exists(path):
+        return ""
+    return ",".join(r["tag"] for r in hist.releases(hist.connect(path), limit=2))
+
+
+REQUIREMENT = pick_requirement()
+RELEASES = pick_releases()
 print(f"project: {os.getcwd()}\nsymbol:  {SYM}\n")
 
 CALLS = [
@@ -52,6 +73,7 @@ CALLS = [
     ("find_dead_code", {"limit": 20}),
     ("describe_module", {"module": MODULE}),
     ("check_usage", {"symbols": [SYM, f"{SYM}.init()"]}),
+    ("impact_of", {"symbol": REQUIREMENT}),
     ("list_projects", {}),
     ("check_index_coverage", {"paths": ["."]}),
     ("query_graph", {"query": "SELECT kind, COUNT(*) n FROM symbols WHERE in_repo=1 "
@@ -59,6 +81,7 @@ CALLS = [
     ("get_history", {"symbol": SYM}),
     ("get_history", {"limit": 30, "with_files": True}),
     ("get_history", {"limit": 10, "narrate": True}),
+    ("get_history", {"release": RELEASES}),
     ("get_digest", {}),
     ("triage_crash", {"trace": f"#0 0x0000000100000000 in {SYM}.init() at Fake.swift:1\n#1 0x0000000100000001 in {SYM}.description at Fake.swift:2", "frames": 2}),
     ("get_releases", {"limit": 10}),
