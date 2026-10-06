@@ -79,6 +79,8 @@ TOOLS = [
          "edge_kinds": {"type": "string", "default": "CALLS",
                         "description": "CALLS,REFERENCES,CONTAINS,INHERITS,OVERRIDES,EXTENDS,ACCESSOR_OF"},
          "first": {"type": "boolean", "default": True, "description": "take best match instead of listing"},
+         "code": {"type": "boolean", "default": True,
+                  "description": "print the source line at each edge's first site, so the call reads without opening the file"},
          "max_rows": {"type": "integer", "default": 120,
                       "description": "cap printed rows; a wide trace is truncated with a note"},
          "max_bytes": {"type": "integer", "default": 8000,
@@ -304,6 +306,7 @@ def call(name, a):
         return run(idxg.cmd_trace, ns(db=db, symbol=a["symbol"], direction=a.get("direction", "both"),
                                       depth=a.get("depth", 2), fanout=a.get("fanout", 25),
                                       kind=a.get("edge_kinds", "CALLS"), first=a.get("first", True),
+                                      code=a.get("code", True),
                                       max_rows=a.get("max_rows", 120),
                                       max_bytes=a.get("max_bytes", 8000)))
     if name == "find_references":

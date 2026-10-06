@@ -92,7 +92,7 @@ its own. Every tool has a CLI equivalent.
 |---|---|---|
 | Is the graph fresh, what does it cover | `index_status` | `idxg status` |
 | Find a symbol by words, regex, kind, module or file | `search_graph` | `idxg search` |
-| Who calls this, what does it call, override and conformance chains | `trace_path` | `idxg trace` |
+| Who calls this, what does it call, override and conformance chains, with the code at each call site | `trace_path` | `idxg trace --code` |
 | Every use of a symbol, with read, write and call roles | `find_references` | `idxg refs` |
 | Read a definition from disk | `get_code_snippet` | `idxg snippet` |
 | Was this file compiled at all | `check_index_coverage` | `idxg coverage` |

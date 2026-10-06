@@ -453,6 +453,19 @@ def cmd_trace(a):
         return
     root = cands[0]
     directions = ["in", "out"] if a.direction == "both" else [a.direction]
+    code_root = meta(db).get("repo_root", "") if getattr(a, "code", False) else None
+    files_seen = {}
+
+    def code_at(site):
+        path, _, ln = site.rpartition(":")
+        if path not in files_seen:
+            try:
+                with open(os.path.join(code_root, path), errors="replace") as f:
+                    files_seen[path] = f.read().splitlines()
+            except OSError:
+                files_seen[path] = []
+        lines, i = files_seen[path], int(ln) - 1 if ln.isdigit() else -1
+        return " ".join(lines[i].split())[:110] if 0 <= i < len(lines) else ""
     tree = {"symbol": qname(db, root["usr_hash"]), "usr": root["usr"], "kind": root["kind"],
             "file": rel(db, root["def_path_hash"]) if root["def_path_hash"] else None, "line": root["def_line"]}
     for d in directions:
@@ -475,6 +488,8 @@ def cmd_trace(a):
                 node = {"name": r["name"], "kind": r["skind"], "edge": ekind, "module": r["module"],
                         "sites": v["sites"][:3], "site_count": len(v["sites"]),
                         "children": walk(other, depth + 1)}
+                if code_root is not None and v["sites"]:
+                    node["code"] = code_at(v["sites"][0])
                 out.append(node)
             return out
 
@@ -496,6 +511,8 @@ def cmd_trace(a):
             site = f"  {n['sites'][0]}" if n["sites"] else ""
             extra = f" (x{n['site_count']})" if n["site_count"] > 1 else ""
             line = f"{prefix}{branch}{n['name']}  {n['kind']} <{n['edge']}>{site}{extra}"
+            if n.get("code"):
+                line += f"\n{prefix}{'   ' if last else '│  '}   {n['code']}"
             print(line)
             printed[0] += 1
             spent[0] += len(line) + 1
@@ -2028,6 +2045,7 @@ def build_parser():
     p.add_argument("--depth", type=int, default=2); p.add_argument("--fanout", type=int, default=25)
     p.add_argument("--kind", default="CALLS", help="edge kinds, comma list (%s)" % ",".join(EDGE_KINDS))
     p.add_argument("--first", action="store_true", help="use the best match instead of listing candidates")
+    p.add_argument("--code", action="store_true", help="print the source line of each edge's first site")
     p.add_argument("--max-rows", type=int, default=120,
                    help="cap printed rows so a wide trace stays readable (default 120)")
     p.add_argument("--max-bytes", type=int, default=8000,
