@@ -1,5 +1,7 @@
 # codebase-brain
 
+<p align="center"><img src="docs/img/logo.png" alt="codebase-brain logo" width="240"></p>
+
 A queryable brain for a Swift or Objective-C codebase, built for coding agents. It keeps
 three things about a project in one place:
 
