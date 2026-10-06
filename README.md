@@ -137,6 +137,10 @@ there is not proof of absence.
 |---|---|---|---|---|
 | Crash triage | 24% fewer | 35% fewer | 34% fewer | 3/3 with, 3/3 without |
 | Module architecture | 8% fewer | 41% fewer | 20% fewer | 28/30 with, 29/30 without |
+| Impact of a protocol signature change | 14% fewer | 5% more | 11% fewer | 30/30 with, 30/30 without |
+| What shipped in three releases | 34% more | 30% fewer | 14% fewer | 29/30 with, 30/30 without |
+| Migration scope of a legacy module | 27% fewer | 3% more | 35% fewer | 30/30 with, 27/30 without |
+| Dead code check of 10 symbols | 5% fewer | 15% more | 53% more | 30/30 with, 30/30 without |
 
 What makes the difference:
 
@@ -151,11 +155,16 @@ What makes the difference:
 - `describe_module` returns a module's layers, its dependencies (and the imports nothing
   uses), its dependents with the symbols they call, and its hotspots in one call, where plain
   search reads build files, greps imports and opens integration code.
+- The graph knows which files the build never compiles, so a file that looks like a user but
+  is not built is not counted: in the migration scope, all three answers with codebase-brain
+  caught one such file and none of the three without did.
 - Fewer and smaller steps mean the agent re-reads less of its own conversation.
 
 Following a flow through the code still means reading that code, and costs about the same
-either way. A stale graph reverses the gain: with a graph that still held deleted files,
-module architecture took 28% more calls with codebase-brain than without it.
+either way. Checking whether given symbols are unused cost more with codebase-brain, because
+the agents ran the graph lookups and then the same whole-repository text searches. A stale
+graph reverses the gain: with a graph that still held deleted files, module architecture took
+28% more calls with codebase-brain than without it.
 
 ## Triage a crash
 
