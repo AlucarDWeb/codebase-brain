@@ -702,6 +702,38 @@ def releases(db, limit=None):
     return rows[:limit] if limit else rows
 
 
+def pr_summary(body, limit=260):
+    """The opening prose of a pull request description: template headings, checklists,
+    images, tables and HTML comments dropped, cut at a sentence or word boundary."""
+    if not body:
+        return ""
+    body = re.sub(r"<!--.*?-->", " ", body, flags=re.S)
+    keep = []
+    for line in body.splitlines():
+        t = line.strip()
+        if not t or t.startswith(("#", "|", "![", "<img", "---", "***", "```")) or re.match(r"^[-*]\s*\[[ xX]\]", t):
+            continue
+        t = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", t)
+        t = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", t)
+        t = re.sub(r"[*_`]{1,3}", "", t).lstrip("-*> ").strip()
+        if t:
+            keep.append(t)
+    text = " ".join(" ".join(keep).split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    return (cut[:end + 1] if end > limit // 2 else cut[:cut.rfind(" ")] + " ...").strip()
+
+
+def shipped(db, release, hotfix):
+    """Where a commit first shipped, as one phrase, or '' when it has not."""
+    if hotfix:
+        return f"first in {release_label(db, hotfix)}, picked after its cut" + (
+            f"; then {release_label(db, release)}" if release else "")
+    return f"first in {release_label(db, release)}" if release else ""
+
+
 def release_label(db, tag):
     """'1.330.0', or '1.333.0 (release branch, not tagged)' for a release known only by its branch."""
     if not tag or db is None:

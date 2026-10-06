@@ -139,7 +139,8 @@ idxg crash crash.txt --since v1.328.0
 It reads Apple crash reports, lldb backtraces, Sentry frames, or any text containing
 `Type.method(labels:)` and `File.swift:line`, and demangles Swift names. For every frame
 in your repository it prints the symbol, who calls it, and the commits that touched its
-file since the tag you pass:
+file since the tag you pass (the commits that release does not contain), each with the
+release it first shipped in and the opening of its pull request description:
 
 ```
 #0  reduce(_:_:)  InstanceMethod  SearchFeature

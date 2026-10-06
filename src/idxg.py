@@ -1127,6 +1127,11 @@ def cmd_crash(a):
         if hdb and sym["rel"]:
             rows = hist.commits_for(hdb, paths=[sym["rel"]], since=since_day, after=since_after, limit=a.commits)
             entry["commits"] = [dict(r) for r in rows]
+            for c in entry["commits"]:
+                c["shipped"] = hist.shipped(hdb, c["release"], c["hotfix"])
+                body = hdb.execute("SELECT pr_body FROM commits WHERE sha = ?", (c["sha"],)).fetchone() \
+                    if "pr_body" in {r[1] for r in hdb.execute("PRAGMA table_info(commits)")} else None
+                c["pr_summary"] = hist.pr_summary(body[0]) if body else ""
         resolved.append(entry)
         if len(resolved) >= a.frames:
             break
@@ -1143,7 +1148,7 @@ def cmd_crash(a):
         print("nothing in this trace resolves to indexed code. Check idxg coverage for the files named, "
               "and that the trace is symbolicated.")
         return
-    spent, budget = 0, a.max_bytes
+    spent, budget, shown = 0, a.max_bytes, set()
     for e in resolved:
         block = [f"\n#{e['frame']}  {e['symbol']}  {e['kind']}  {e['module'] or ''}",
                  f"    {e['file']}:{e['def_line']}" + (f"  (trace line {e['trace_line']})" if e["trace_line"] else "")
@@ -1162,6 +1167,14 @@ def cmd_crash(a):
                     pr = f"  #{c['pr']}" if c["pr"] else ""
                     subject = hist.PR_RE.sub("", c["subject"]).strip()[:90]
                     block.append(f"      {c['day']}  {c['short']}  {subject}{pr}  ({c['author']})")
+                    # A commit that touched several frames' files is described once.
+                    if c["sha"] in shown:
+                        block.append("          (described above)")
+                        continue
+                    shown.add(c["sha"])
+                    block.append(f"          shipped: {c['shipped'] or 'not in any release or release branch yet'}")
+                    if c["pr_summary"]:
+                        block.append(f"          PR: {c['pr_summary']}")
             else:
                 block.append(f"    commits touching {e['file'].split('/')[-1]}" + (f" since {since}" if since else "") + ": none")
         text = "\n".join(block)

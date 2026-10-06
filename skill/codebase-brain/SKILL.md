@@ -168,8 +168,10 @@ file and line when the trace has them, else by name, and left unresolved wheneve
 mean more than one thing: a file name shared by several files resolves to the one defining
 the frame's function, a frame naming a type matches only that type's method, and the source
 lines Sentry quotes under a frame are ignored. Each is printed with its definition, its callers with
-call sites, and the commits touching its file since `--since` (a date or a git ref such as
-the previous release tag). Then read the PR bodies with `idxg history show`.
+call sites, and the commits touching its file since `--since` (a date, or a git ref such as
+the previous release tag, meaning the commits that release does not contain). Each commit
+carries the release it first shipped in, hotfix release branches included, and the opening
+of its PR description; `idxg history show` gives the full description.
 
 It reports what changed near the crash, not why it crashed. The graph has no runtime data
 and no expression-level detail, so a force unwrap, a race or a nil is invisible to it.

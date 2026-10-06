@@ -178,9 +178,10 @@ TOOLS = [
      "description": "Map a symbolicated stack trace (Apple crash report, lldb backtrace, Sentry frames, or "
                     "any text with Type.method(labels:) and File.swift:line) onto the graph and the "
                     "history. For each in-repo frame: the symbol and its definition, its callers with call "
-                    "sites, and the commits that touched its file since a date or release tag, with PR "
-                    "numbers. Then read the PR bodies with get_commit. This gathers what changed near the "
-                    "crash; it does not know why it crashed.",
+                    "sites, and the commits that touched its file since a date or release tag, each with its "
+                    "PR number, the release it first shipped in (hotfix release branches included) and the "
+                    "opening of its PR description. Call get_commit only for the full description. This "
+                    "gathers what changed near the crash; it does not know why it crashed.",
      "inputSchema": {"type": "object", "properties": {
          "trace": {"type": "string", "description": "the stack trace text"},
          "since": {"type": "string", "description": "YYYY-MM-DD or a git ref such as the previous release tag"},
