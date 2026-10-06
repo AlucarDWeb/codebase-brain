@@ -17,7 +17,7 @@ the CLI stayed `idxg`.
 | `src/viz.py` | 2534 | HTML explorer: data slicing and the whole page as one Python string |
 | `src/serve.py` | 240 | local HTTP server behind `idxg open`: serves the explorer and answers every tab's lookups (symbols, neighbours, kinds, dead code, doc full text) from the whole db, read-only |
 | `src/deadcode.py` | 98 | dead-code candidate query and its text cross-check |
-| `src/modulecard.py` | 140 | `describe_module`: a module's folder and layers, used and imported-only dependencies, dependents with the symbols they use, type connectivity ranking, coverage |
+| `src/modulecard.py` | 142 | `describe_module`: a module's folder and layers, used and imported-only dependencies, dependents with the symbols they use, type connectivity ranking, coverage |
 | `src/history.py` | 1745 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; releases from tags and `release/<version>` branches, hotfix picks by patch id; per-commit narration, weekly digest, timeline, vault export |
 | `src/crash.py` | 260 | stack trace parsing (Apple, lldb, Sentry, free text), frame resolution by file:line (checked against the frame's function name) or by typed name, callers, the fork point of a `--since` ref |
 | `src/templates/weekly-digest.html` | | the knowledge vault's fixed digest layout, copied verbatim; only `{{TITLE}}` and `{{DIGEST_JSON}}` are substituted |
