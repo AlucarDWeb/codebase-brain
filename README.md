@@ -131,6 +131,36 @@ and the file is also what you can send someone. On its own it holds only the mos
 default, `idxg viz --limit` changes it) and each one's strongest edges, so a missing link
 there is not proof of absence.
 
+## Why an agent is faster with it
+
+Measured on the Wallapop iOS app with fresh Claude Opus 5.5 agents: three runs with
+codebase-brain and three with only `rg`, `fd`, git and `gh`, all with the same prompt.
+
+| Job | Tool calls | Tokens read from tools | Tokens processed in total | Correct |
+|---|---|---|---|---|
+| Crash triage: the change behind a production crash and the release that shipped its fix | 24% fewer | 35% fewer | 34% fewer | 3/3 on both sides |
+| Module architecture: layers, dependencies, dependents, search flow and hotspots of a 359-file module | 8% fewer | 41% fewer | 20% fewer | 28/30 with, 29/30 without |
+
+What makes the difference:
+
+- A stack trace frame resolves to the exact function, even when several files share its
+  name, so the agent never opens look-alike files to find the right one.
+- Each commit near a crash carries the release it first shipped in, untagged hotfix branches
+  included, and the opening of its pull request description, so the agent does not rebuild
+  the release history with git and `gh`.
+- The commit list covers every frame's file, so a related fix elsewhere turns up without a
+  separate search. In the crash test the root-cause follow-up was reported in 3 of 3 runs with
+  codebase-brain and 1 of 3 without.
+- `describe_module` returns a module's layers, its dependencies (and the imports nothing
+  uses), its dependents with the symbols they call, and its hotspots in one call, where plain
+  search reads BUILD files, greps imports and opens integration code.
+- Fewer and smaller steps mean the agent re-reads less of its own conversation.
+
+Following a flow through the code still means reading that code, and costs about the same
+either way. A stale graph reverses the gain: on a graph that still held deleted files, the
+module test took 28% more calls with codebase-brain than without it. These are two tasks on
+one codebase with three runs per side.
+
 ## Triage a crash
 
 ```bash
