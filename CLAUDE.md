@@ -72,7 +72,9 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
   2026 the Wallapop graph held 50 SearchFeature files `main` no longer has (a SwiftUI branch,
   deleted use cases, the removed Kernel module), and agents spent a dozen calls telling them
   apart. `build.source_gone` drops every record and unit whose source is missing from the
-  checkout; `meta.records_gone` counts them.
+  checkout; `meta.records_gone` counts them. Two stores (or two builds) can also hold records of
+  one file, an older version or the same file under another path spelling; the build keeps the
+  newest record per file by its mtime (`meta.records_superseded`, 4,212 on Wallapop).
 - **`build.py` writes to `<db>.building` and swaps.** Clear `-wal`/`-shm` on *both* sides
   of the swap: a stale journal beside the destination makes SQLite report
   `database disk image is malformed`. Any writer touching a live database (the status

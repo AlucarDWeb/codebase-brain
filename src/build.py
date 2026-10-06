@@ -247,6 +247,15 @@ def source_gone(path, root, prefix_map, _seen={}):
     return gone
 
 
+def record_mtime(store, name):
+    for fmt in ("v5", "v4"):
+        try:
+            return os.path.getmtime(os.path.join(store, fmt, "records", name[-2:], name))
+        except OSError:
+            continue
+    return 0.0
+
+
 def _pid_alive(who):
     """True when the lock's `pid N` still names a running process."""
     try:
@@ -351,9 +360,24 @@ def main():
         files_gone = {records[r][1] for r in gone}
         print(f"  skipping {len(gone)} records of {len(files_gone)} source files no longer in the checkout", flush=True)
     all_units = [u for u in all_units if not (u[2] and source_gone(u[2], root, prefix_map))]
+    # Two stores, or two builds in one store, can each hold a record of the same source file:
+    # an older version of it, or the same file under another path spelling. Reading both
+    # doubles its definitions and keeps the old one's symbols alive, so the newest wins.
+    newest = {}
+    for r, v in records.items():
+        if r in gone:
+            continue
+        key = normalize(v[1], root, prefix_map)[0]
+        t = record_mtime(v[0], r)
+        if key not in newest or t > newest[key][1]:
+            newest[key] = (r, t)
+    keep = {r for r, _ in newest.values()}
+    superseded = len(records) - len(gone) - len(keep)
+    if superseded:
+        print(f"  skipping {superseded} older records of files that have a newer one", flush=True)
 
     batch = [(v[0], r, v[1], v[2]) for r, v in records.items()
-             if r not in gone and (args.include_system or not v[3])]
+             if r in keep and (args.include_system or not v[3])]
     if args.limit_records:
         batch = batch[:args.limit_records]
     print(f"extracting {len(batch)} records with {jobs} workers", flush=True)
@@ -464,6 +488,7 @@ def main():
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "prefix_map": json.dumps(prefix_map), "build_seconds": f"{time.time()-t0:.1f}",
         "units": str(len(all_units)), "records": str(len(batch)), "records_gone": str(len(gone)),
+        "records_superseded": str(superseded),
         "stores": json.dumps(stores),
         "store_signature": json.dumps(prj.store_signature(stores)),
     }.items():
