@@ -211,8 +211,11 @@ touches it. `idxg init` and every graph build refresh it.
 - Pull request descriptions are fetched through `gh` when it is logged in, only for commits
   not seen before. Turn this off with `idxg config history_prs=false`.
 - Releases are version tags (`1.329.0`, `v2.3`, or a pattern set with
-  `history_release_tags`). A commit belongs to the first release that branched after it.
-  A commit merged after the latest branch point shows as "not in any tagged release yet".
+  `history_release_tags`), plus branches named `release/<version>` that have no tag yet (a
+  release in progress, or a hotfix that was never tagged; other prefixes with
+  `history_release_branches`). A commit belongs to the first release that branched after it.
+  A commit cherry-picked onto an earlier release branch after its cut, such as a hotfix, is
+  matched by patch id and reported as shipping first in that release.
 - Docs are every tracked markdown file except vendored trees and changelogs, or exactly
   what a JSON manifest named by `idxg config docs_manifest=...` includes.
 

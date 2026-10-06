@@ -191,10 +191,12 @@ Treat the output as the list of places and pull requests to read first.
   no body here, so without `gh auth login` the narration says only what files moved, and
   `idxg history digest` lists that as a gap. `--narrate` and the digest prefer the PR
   template section whose heading mentions what, why or context.
-- **Releases are version tags mapped to the history branch.** A commit's release is the
-  first tag whose branch point is at or after it; a fix merged to `main` after the cut and
-  synced to the release branch by a second commit shows on `main` as "not in any tagged
-  release yet", which is true of that commit. Read the sync PR for the release branch.
+- **Releases are version tags and `release/<version>` branches mapped to the history
+  branch.** A commit's release is the first one whose branch point is at or after it. A fix
+  merged after the cut and cherry-picked onto the release branch (a hotfix) is matched by
+  patch id: the commit says it first shipped in that release, then in its own. A release
+  branch without a tag is labelled "release branch, not tagged", so a hotfix that never got
+  a tag still shows; whether it reached the store is outside git.
 - **`--test-only` is a candidate list too.** A production caller in an uncompiled file is
   invisible, so a symbol "kept alive only by tests" may have a real caller the build
   never saw. Check coverage before deleting.

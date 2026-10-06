@@ -541,7 +541,8 @@ def main():
             history.build(root, db_path, branch=cfg.get("history_branch") or None,
                           first_parent=cfg.get("history_first_parent", True),
                           prs=cfg.get("history_prs", True), manifest_path=_manifest(root, cfg),
-                          release_tags=cfg.get("history_release_tags") or None)
+                          release_tags=cfg.get("history_release_tags") or None,
+                          release_branches=cfg.get("history_release_branches") or None)
         except Exception as e:
             # The graph is already swapped in; a history failure must not fail the build
             # or leave its lock behind.

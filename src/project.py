@@ -50,6 +50,7 @@ DEFAULT_CONFIG = {
     "viz_history_weeks": 26,          # weekly digests embedded in the explorer
     "update_check": True,             # ask GitHub once a day whether a newer release exists (global only)
     "history_release_tags": "",       # regex for version tags (blank = v1.2.3 or 1.2.3)
+    "history_release_branches": [],   # branch prefixes whose <prefix><version> is a release (blank = release/)
 }
 
 GLOBAL_ONLY = ("autoindex", "poll_minutes", "update_check")
@@ -73,6 +74,7 @@ CONFIG_HELP = {
     "viz_history_weeks": "how many weekly digests the explorer embeds",
     "update_check": "check GitHub once a day for a newer release, global only",
     "history_release_tags": "regex that picks the git tags that are releases (blank = v1.2.3 or 1.2.3)",
+    "history_release_branches": "branch prefixes; a branch <prefix><version> without a tag is a release too (blank = release/)",
 }
 
 

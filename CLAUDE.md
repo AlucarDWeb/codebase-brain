@@ -150,6 +150,12 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
   `narrate_commit` and `week_digest` emit maps to a field or count in the db. Add a fact by
   adding a query; do not add adjectives. The digest template is the vault's and is not
   edited here: a layout change belongs in the vault first, then a fresh copy.
+- **Releases include untagged release branches and hotfix picks.** `_sync_releases` adds
+  `release/<version>` branches without a tag (`source = 'branch'`, rebuilt every sync since
+  heads move); `_sync_picks` matches release-only commits to history-branch commits by
+  `git patch-id` within the window after the cut, caching per release head in
+  `release_scan`. `commits.hotfix` is the earliest release that received a pick. Compare commit
+  times with `datetime()`: commits carry the author's offset, release bots write `Z`.
 - **PR descriptions are optional enrichment, never required.** `enrich_prs` runs only when
   `gh auth status` succeeds and the origin is GitHub; every reader must cope with
   `pr_body` being NULL (not fetched) or `''` (fetched, PR gone).

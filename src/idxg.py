@@ -795,7 +795,8 @@ def cmd_history_build(a):
     path, counts = hist.build(root, graph, branch=a.branch or (cfg.get("history_branch") or None),
                               first_parent=first_parent, full=a.full, since=a.since,
                               docs=a.docs, prs=a.prs and cfg.get("history_prs", True), manifest_path=manifest,
-                              release_tags=cfg.get("history_release_tags") or None)
+                              release_tags=cfg.get("history_release_tags") or None,
+                              release_branches=cfg.get("history_release_branches") or None)
     if getattr(a, "json", False):
         print(json.dumps({"db": path, **counts}))
 
@@ -843,7 +844,7 @@ def cmd_history_log(a):
         if getattr(a, "narrate", False):
             for o in out:
                 full = hdb.execute("SELECT * FROM commits WHERE sha = ?", (o["sha"],)).fetchone()
-                o["narrative"] = hist.narrate_commit(full, hist.files_of(hdb, o["sha"]), m.get("remote_web", ""))
+                o["narrative"] = hist.narrate_commit(full, hist.files_of(hdb, o["sha"]), m.get("remote_web", ""), hdb)
         print(json.dumps({"branch": m.get("branch"), "head": m.get("head_sha"), "commits": out}, indent=1))
         return
     scope = [x for x in paths + [a.module, a.component, (f"release {a.release}" if getattr(a, "release", None) else None)] if x]
@@ -861,7 +862,7 @@ def cmd_history_log(a):
     for r in rows:
         if getattr(a, "narrate", False):
             full = hdb.execute("SELECT * FROM commits WHERE sha = ?", (r["sha"],)).fetchone()
-            block = [textwrap.fill(hist.narrate_commit(full, hist.files_of(hdb, r["sha"]), web), 100)
+            block = [textwrap.fill(hist.narrate_commit(full, hist.files_of(hdb, r["sha"]), web, hdb), 100)
                      + (f"\n  {web}/pull/{r['pr']}" if web and r["pr"] else "")]
         else:
             block = [_fmt_commit(r)]
@@ -913,7 +914,7 @@ def cmd_history_show(a):
         else:
             print("release: not in any tagged release yet")
     print(f"{r['files']} files, +{r['ins']:,} -{r['del']:,}, {r['parents']} parent(s)")
-    print("\n" + textwrap.fill(hist.narrate_commit(r, hist.files_of(hdb, r["sha"], 2000), web), 100))
+    print("\n" + textwrap.fill(hist.narrate_commit(r, hist.files_of(hdb, r["sha"], 2000), web, hdb), 100))
     if r["pr_body"]:
         print(f"\npull request description" + (f" ({r['pr_labels']})" if r["pr_labels"] else ""))
         print(textwrap.indent(r["pr_body"][:a.max_body], "  "))
@@ -1194,10 +1195,12 @@ def cmd_history_releases(a):
     if not rows:
         print("no version tags found; set idxg config history_release_tags=<regex> if yours look different")
         return
-    print(f"releases by the point where their branch left {m.get('branch')}; commits counts what first shipped in each")
-    print(f"  {'tag':<14} {'branched':<11} {'tagged':<11} {'commits':>8}")
+    print(f"releases by the point where their branch left {m.get('branch')}; commits counts what first shipped in each,"
+          f" picked what a release received after its cut (a hotfix)")
+    print(f"  {'release':<14} {'branched':<11} {'tagged':<22} {'commits':>8} {'picked':>7}")
     for r in rows:
-        print(f"  {r['tag']:<14} {r['base_day'] or '':<11} {r['tag_date'] or '':<11} {r['commits']:>8,}")
+        tagged = r["tag_date"] or "" if r["source"] == "tag" else "not tagged (branch)"
+        print(f"  {r['tag']:<14} {r['base_day'] or '':<11} {tagged:<22} {r['commits']:>8,} {r['picks'] or '':>7}")
     print("  idxg history log --release <tag> lists what first shipped in one")
 
 

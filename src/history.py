@@ -20,7 +20,10 @@ CREATE TABLE IF NOT EXISTS commit_files(sha TEXT, path TEXT, old_path TEXT, ins 
 CREATE TABLE IF NOT EXISTS components(component TEXT PRIMARY KEY, first_sha TEXT, first_date TEXT,
   last_sha TEXT, last_date TEXT, commits INTEGER, alive INTEGER, module TEXT);
 CREATE TABLE IF NOT EXISTS releases(tag TEXT PRIMARY KEY, tag_sha TEXT, tag_date TEXT, base_sha TEXT,
-  base_committed TEXT, base_day TEXT);
+  base_committed TEXT, base_day TEXT, source TEXT DEFAULT 'tag');
+CREATE TABLE IF NOT EXISTS release_picks(tag TEXT, sha TEXT, pick_sha TEXT, PRIMARY KEY(tag, sha));
+CREATE TABLE IF NOT EXISTS release_scan(tag TEXT PRIMARY KEY, head_sha TEXT);
+CREATE INDEX IF NOT EXISTS ix_picks_sha ON release_picks(sha);
 CREATE TABLE IF NOT EXISTS module_rank(module TEXT PRIMARY KEY, prefix TEXT, layer TEXT, calls_in INTEGER,
   calls_out INTEGER, symbols INTEGER);
 CREATE TABLE IF NOT EXISTS docs(path TEXT PRIMARY KEY, title TEXT, kind TEXT, module TEXT,
@@ -41,8 +44,11 @@ COMMIT_INSERT = """INSERT OR REPLACE INTO commits(sha, short, parents, author, e
   month, subject, body, pr, tickets, files, ins, del, seq) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
 # Columns added after the first release; _migrate adds them to an older history db.
 COMMIT_EXTRA = (("pr_title", "TEXT"), ("pr_body", "TEXT"), ("pr_labels", "TEXT"), ("pr_merged", "TEXT"),
-                ("pr_author", "TEXT"), ("release", "TEXT"))
+                ("pr_author", "TEXT"), ("release", "TEXT"), ("hotfix", "TEXT"))
 RELEASE_TAG_RE = r"^v?\d+\.\d+(\.\d+)?$"
+# A branch named <prefix><version> is a release too: cut but not tagged yet, or a hotfix that
+# never got a tag.
+RELEASE_BRANCH_PREFIXES = ("release/",)
 PR_BODY_CAP = 6000
 PR_BATCH = 40
 # Top-level directories that hold build, CI and developer tooling rather than product code.
@@ -377,7 +383,7 @@ def sync_docs(db, root, branch, mapper, manifest_path=None, log=print):
 # ---------------------------------------------------------------- build
 
 def build(root, graph_db, branch=None, first_parent=True, full=False, since=None,
-          docs=True, prs=True, manifest_path=None, release_tags=None, log=print):
+          docs=True, prs=True, manifest_path=None, release_tags=None, release_branches=None, log=print):
     root = os.path.realpath(root)
     hdb_path = history_db_for(graph_db)
     os.makedirs(os.path.dirname(hdb_path), exist_ok=True)
@@ -448,7 +454,9 @@ def build(root, graph_db, branch=None, first_parent=True, full=False, since=None
         db.commit()
     _rebuild_components(db, root, branch, mapper)
     _rebuild_module_rank(db, graph_db, mapper)
-    _sync_releases(db, root, branch, release_tags or RELEASE_TAG_RE, log=log)
+    _sync_releases(db, root, branch, release_tags or RELEASE_TAG_RE,
+                   tuple(release_branches or RELEASE_BRANCH_PREFIXES), log=log)
+    _sync_picks(db, root, branch, log=log)
     if docs:
         sync_docs(db, root, branch, mapper, manifest_path, log=log)
     if prs:
@@ -476,26 +484,53 @@ def build(root, graph_db, branch=None, first_parent=True, full=False, since=None
     return hdb_path, counts
 
 
-def _sync_releases(db, root, branch, tag_re, log=print):
-    """Version tags mapped to the point where their branch left the history branch, so every
-    commit can be labelled with the first release that contains it. Tags on the branch
-    itself map to themselves; tags on a release branch map to the fork point."""
+def _release_branches(root, prefixes, tag_re):
+    """{version: (head sha, head date)} for local and remote branches named <prefix><version>."""
+    pat = re.compile(tag_re)
+    out = git(root, "for-each-ref", "--format=%(refname)%1f%(objectname)%1f%(committerdate:iso-strict)",
+              "refs/heads", "refs/remotes", check=False)
+    found = {}
+    for line in out.split("\n"):
+        parts = line.split(FIELD)
+        if len(parts) != 3:
+            continue
+        ref, sha, date = parts
+        name = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref.split("/", 3)[-1]
+        for pre in prefixes:
+            version = name[len(pre):] if name.startswith(pre) else ""
+            if version and pat.match(version) and (version not in found or date > found[version][1]):
+                found[version] = (sha, date)
+    return found
+
+
+def _sync_releases(db, root, branch, tag_re, branch_prefixes=RELEASE_BRANCH_PREFIXES, log=print):
+    """Version tags, and release branches without a tag, mapped to the point where they left
+    the history branch, so every commit can be labelled with the first release that contains
+    it. Tags on the branch itself map to themselves; tags on a release branch map to the fork."""
     pat = re.compile(tag_re)
     tags = [t for t in git(root, "tag", "-l", check=False).split("\n") if t and pat.match(t)]
-    have = {r[0] for r in db.execute("SELECT tag FROM releases")}
-    new = [t for t in tags if t not in have]
-    for t in new:
-        info = git(root, "log", "-1", "--format=%H%x1f%cs", t + "^{commit}", check=False).strip()
+    have = dict(db.execute("SELECT tag, source FROM releases").fetchall())
+
+    def add(version, head, source):
+        info = git(root, "log", "-1", "--format=%H%x1f%cs", head + "^{commit}", check=False).strip()
         if not info:
-            continue
-        tag_sha, _, tag_date = info.partition(FIELD)
-        base = git(root, "merge-base", tag_sha, branch, check=False).strip()
+            return False
+        head_sha, _, head_date = info.partition(FIELD)
+        base = git(root, "merge-base", head_sha, branch, check=False).strip()
         if not base:
-            continue
+            return False
         row = git(root, "log", "-1", "--format=%cI%x1f%cs", base, check=False).strip()
         committed, _, day = row.partition(FIELD)
-        db.execute("INSERT OR REPLACE INTO releases VALUES(?,?,?,?,?,?)", (t, tag_sha, tag_date, base, committed, day))
-    gone = have - set(tags)
+        db.execute("""INSERT OR REPLACE INTO releases(tag, tag_sha, tag_date, base_sha, base_committed, base_day, source)
+                      VALUES(?,?,?,?,?,?,?)""", (version, head_sha, head_date, base, committed, day, source))
+        return True
+
+    new = [t for t in tags if have.get(t) != "tag" and add(t, t, "tag")]
+    # Branch heads move, so their rows are rebuilt on every sync; a tag replaces its branch.
+    db.execute("DELETE FROM releases WHERE source = 'branch'")
+    branches = {v: hd for v, hd in _release_branches(root, branch_prefixes, tag_re).items() if v not in tags}
+    added = [v for v, (head, _) in branches.items() if add(v, head, "branch")]
+    gone = set(have) - set(tags) - set(added)
     if gone:
         db.executemany("DELETE FROM releases WHERE tag = ?", [(g,) for g in gone])
     db.commit()
@@ -508,7 +543,57 @@ def _sync_releases(db, root, branch, tag_re, log=print):
                                                 WHERE datetime(r.base_committed) >= datetime(commits.committed)
                                                 ORDER BY datetime(r.base_committed) ASC, r.tag ASC LIMIT 1)""")
     db.commit()
-    log(f"releases: {len(tags)} version tags, {len(new)} new" + (f", {len(gone)} removed" if gone else ""))
+    log(f"releases: {len(tags)} version tags, {len(new)} new" + (f", {len(added)} untagged release branches" if added else "")
+        + (f", {len(gone)} removed" if gone else ""))
+
+
+def _patch_ids(root, log_args, stdin=None):
+    """[(patch id, commit sha)] for the commits a `git log -p` call prints."""
+    p1 = subprocess.Popen(["git", "-C", root, "log", "-p", "--format=commit %H"] + log_args,
+                          stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    p2 = subprocess.Popen(["git", "-C", root, "patch-id", "--stable"], stdin=p1.stdout,
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    p1.stdout.close()
+    if stdin is not None:
+        p1.stdin.write(stdin.encode())
+        p1.stdin.close()
+    out, _ = p2.communicate()
+    p1.wait()
+    return [tuple(line.split()[:2]) for line in out.splitlines() if len(line.split()) >= 2]
+
+
+def _sync_picks(db, root, branch, log=print):
+    """History-branch commits that a release received as cherry-picks after its cut, matched by
+    patch id. A hotfix ships them before the next regular release does, so a commit's `hotfix`
+    names the first release that picked it."""
+    scanned = dict(db.execute("SELECT tag, head_sha FROM release_scan").fetchall())
+    rels = db.execute("SELECT tag, tag_sha, base_committed FROM releases").fetchall()
+    for tag, head, base_committed in rels:
+        if scanned.get(tag) == head:
+            continue
+        db.execute("DELETE FROM release_picks WHERE tag = ?", (tag,))
+        picks = dict(_patch_ids(root, ["--no-merges", head, "^" + branch]))
+        if picks:
+            last = git(root, "log", "-1", "--no-merges", "--format=%cI", head, "^" + branch, check=False).strip()
+            cands = [r[0] for r in db.execute(
+                """SELECT sha FROM commits WHERE datetime(committed) > datetime(?)
+                   AND datetime(committed) <= datetime(?)""", (base_committed, last))]
+            if cands:
+                # A squash merge's own diff, or a merge commit's diff against its first parent,
+                # is what a cherry-pick of the change reproduces.
+                for pid, sha in _patch_ids(root, ["--no-walk", "-m", "--first-parent", "--stdin"], "\n".join(cands)):
+                    if pid in picks:
+                        db.execute("INSERT OR REPLACE INTO release_picks VALUES(?,?,?)", (tag, sha, picks[pid]))
+        db.execute("INSERT OR REPLACE INTO release_scan VALUES(?,?)", (tag, head))
+    db.execute("DELETE FROM release_picks WHERE tag NOT IN (SELECT tag FROM releases)")
+    db.execute("DELETE FROM release_scan WHERE tag NOT IN (SELECT tag FROM releases)")
+    db.execute("""UPDATE commits SET hotfix = (SELECT p.tag FROM release_picks p JOIN releases r ON r.tag = p.tag
+                                               WHERE p.sha = commits.sha AND p.tag != COALESCE(commits.release, '')
+                                               ORDER BY datetime(r.base_committed), r.tag LIMIT 1)""")
+    db.commit()
+    n = db.execute("SELECT COUNT(*) FROM commits WHERE hotfix IS NOT NULL").fetchone()[0]
+    log(f"hotfixes: {n} commits shipped early through a release branch")
 
 
 def _rebuild_components(db, root, branch, mapper):
@@ -598,17 +683,34 @@ def commits_for(db, paths=None, module=None, component=None, author=None, since=
     if query:
         where.append("(c.subject LIKE ? OR c.body LIKE ? OR c.tickets LIKE ?)")
         args += [f"%{query}%"] * 3
-    sql = f"""SELECT DISTINCT c.sha, c.short, c.author, c.day, c.subject, c.pr, c.tickets, c.files, c.ins, c.del, c.release
-              FROM commits c {join} {'WHERE ' + ' AND '.join(where) if where else ''}
+    cols = {r[1] for r in db.execute("PRAGMA table_info(commits)")}
+    hotfix = "c.hotfix" if "hotfix" in cols else "NULL AS hotfix"
+    sql = f"""SELECT DISTINCT c.sha, c.short, c.author, c.day, c.subject, c.pr, c.tickets, c.files, c.ins, c.del, c.release,
+                     {hotfix} FROM commits c {join} {'WHERE ' + ' AND '.join(where) if where else ''}
               ORDER BY c.committed DESC LIMIT ?"""
     return db.execute(sql, args + [limit]).fetchall()
 
 
 def releases(db, limit=None):
-    rows = db.execute("""SELECT r.tag, r.tag_date, r.base_day, r.base_sha,
-                                (SELECT COUNT(*) FROM commits c WHERE c.release = r.tag) commits
-                         FROM releases r ORDER BY r.base_committed DESC""").fetchall()
+    cols = {r[1] for r in db.execute("PRAGMA table_info(releases)")}
+    picks = db.execute("SELECT name FROM sqlite_master WHERE name = 'release_picks'").fetchone()
+    rows = db.execute(f"""SELECT r.tag, r.tag_date, r.base_day, r.base_sha,
+                                (SELECT COUNT(*) FROM commits c WHERE c.release = r.tag) commits,
+                                {"r.source" if "source" in cols else "'tag'"} AS source,
+                                {"(SELECT COUNT(*) FROM release_picks p WHERE p.tag = r.tag)" if picks else "0"} AS picks
+                         FROM releases r ORDER BY datetime(r.base_committed) DESC, r.tag DESC""").fetchall()
     return rows[:limit] if limit else rows
+
+
+def release_label(db, tag):
+    """'1.330.0', or '1.333.0 (release branch, not tagged)' for a release known only by its branch."""
+    if not tag or db is None:
+        return tag
+    try:
+        row = db.execute("SELECT source FROM releases WHERE tag = ?", (tag,)).fetchone()
+    except sqlite3.OperationalError:
+        return tag
+    return f"{tag} (release branch, not tagged)" if row and row[0] == "branch" else tag
 
 
 def files_of(db, sha, limit=200):
@@ -841,6 +943,8 @@ def _migrate(db):
     for col, typ in COMMIT_EXTRA:
         if col not in have:
             db.execute(f"ALTER TABLE commits ADD COLUMN {col} {typ}")
+    if "source" not in {r[1] for r in db.execute("PRAGMA table_info(releases)")}:
+        db.execute("ALTER TABLE releases ADD COLUMN source TEXT DEFAULT 'tag'")
     db.commit()
 
 
@@ -1086,7 +1190,7 @@ def commit_tag(row, prof):
     return None
 
 
-def narrate_commit(row, files, web=""):
+def narrate_commit(row, files, web="", db=None):
     """One plain paragraph about one commit, every clause backed by a field of the row."""
     prof, modules = file_profile(files)
     keys = row.keys()
@@ -1126,10 +1230,14 @@ def narrate_commit(row, files, web=""):
         parts.append(touch)
     if "pr_labels" in keys and row["pr_labels"]:
         parts.append("Labels: " + row["pr_labels"].replace(",", ", ") + ".")
-    if "release" in keys and row["release"]:
-        parts.append(f"It first shipped in release {row['release']}.")
+    hotfix = row["hotfix"] if "hotfix" in keys else None
+    if hotfix:
+        parts.append(f"It first shipped in {release_label(db, hotfix)}, picked onto that release after its cut"
+                     + (f", and then in release {release_label(db, row['release'])}." if row["release"] else "."))
+    elif "release" in keys and row["release"]:
+        parts.append(f"It first shipped in release {release_label(db, row['release'])}.")
     elif "release" in keys:
-        parts.append("It is not in any tagged release yet.")
+        parts.append("It is not in any release or release branch yet.")
     return " ".join(parts)
 
 
@@ -1141,7 +1249,7 @@ def narrated_commits(db, rows, web="", files_cap=200):
         out.append({"sha": full["sha"], "short": full["short"], "day": full["day"], "author": full["author"],
                     "pr": full["pr"], "tickets": full["tickets"], "subject": full["subject"],
                     "url": f"{web}/pull/{full['pr']}" if web and full["pr"] else "",
-                    "text": narrate_commit(full, files, web)})
+                    "text": narrate_commit(full, files, web, db)})
     return out
 
 
@@ -1255,7 +1363,7 @@ def week_digest(db, start, end, web="", rows=None, label=None, digest_kind="week
         a = areas.setdefault(key, {"name": key, "layer": layer, "klass": klass, "order": order, "rows": [],
                                    "ins": 0, "del": 0, "authors": collections.Counter(), "files": 0})
         tag = commit_tag(row, prof)
-        why = narrate_commit(row, files, web)
+        why = narrate_commit(row, files, web, db)
         has_body = bool((row["pr_body"] if "pr_body" in row.keys() else "") or row["body"])
         if not has_body:
             no_body += 1
