@@ -140,10 +140,10 @@ there is not proof of absence.
 |---|---|---|---|---|
 | Crash triage | 24% fewer | 35% fewer | 34% fewer | 3/3 with, 3/3 without |
 | Module architecture | 8% fewer | 41% fewer | 20% fewer | 28/30 with, 29/30 without |
-| Impact of a protocol signature change | 14% fewer | 5% more | 11% fewer | 30/30 with, 30/30 without |
-| What shipped in three releases | 34% more | 30% fewer | 14% fewer | 29/30 with, 30/30 without |
-| Migration scope of a legacy module | 27% fewer | 3% more | 35% fewer | 30/30 with, 27/30 without |
-| Dead code check of 10 symbols | 55% fewer | 60% fewer | 14% more | 30/30 with, 30/30 without |
+| Impact of a protocol signature change | 41% fewer | 30% fewer | 46% fewer | 30/30 with, 30/30 without |
+| What shipped in three releases | 33% fewer | 68% fewer | 44% fewer | 28/30 with, 28/30 without |
+| Migration scope of a legacy module | 37% fewer | 40% fewer | 48% fewer | 30/30 with, 27/30 without |
+| Dead code check of 10 symbols | 60% fewer | 62% fewer | 41% fewer | 30/30 with, 30/30 without |
 
 What makes the difference:
 
@@ -156,19 +156,26 @@ What makes the difference:
   separate search: a root-cause follow-up was reported in 3 of 3 crash triages with
   codebase-brain and 1 of 3 without.
 - `describe_module` returns a module's layers, its dependencies (and the imports nothing
-  uses), its dependents with the symbols they call, and its hotspots in one call, where plain
-  search reads build files, greps imports and opens integration code.
+  uses), its dependents with the symbols they call, its hotspots, and for each of its types
+  the modules that use it with the first file and line, in one call, where plain search reads
+  build files, greps imports and opens integration code.
 - The graph knows which files the build never compiles, so a file that looks like a user but
   is not built is not counted: in the migration scope, all three answers with codebase-brain
   caught one such file and none of the three without did.
 - `check_usage` answers "can these symbols be deleted" for a whole list in one call, including a
-  text search of the files the index never saw, so the agent does not grep each name itself.
+  text search of the files the index never saw and the line of code at each use, so the agent
+  neither greps each name nor opens each site.
+- `impact_of` lists what a signature change breaks: implementations, call sites with their
+  code, protocol extension helpers that forward to the member, and the matching lines of files
+  the build never compiled.
+- `get_history` with several releases prints each release's cut point and every pull request
+  that first shipped in it with its what and why, so the agent neither opens each pull request
+  nor works out fork points with git.
 - Fewer and smaller steps mean the agent re-reads less of its own conversation.
 
 Following a flow through the code still means reading that code, and costs about the same
 either way. Total processed counts the conversation re-read at every turn, so it follows the
-number of turns: on the dead-code check the agents without codebase-brain packed several
-searches into each turn. A stale graph reverses the gain: with a graph that still held deleted files, module architecture took
+number of turns. A stale graph reverses the gain: with a graph that still held deleted files, module architecture took
 28% more calls with codebase-brain than without it.
 
 ## Triage a crash
