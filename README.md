@@ -18,6 +18,7 @@ A queryable brain for a Swift or Objective-C codebase, built for coding agents. 
 - [Troubleshooting](#troubleshooting)
 - [Removing a project](#removing-a-project)
 - [Source layout](#source-layout)
+- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -401,6 +402,28 @@ A project skill with a `## Project notes` section is kept unless you pass `--for
 | `src/viz.py` | the HTML explorer |
 | `src/serve.py` | the local server behind `idxg open` |
 | `src/mcp_server.py` | the MCP server |
+
+## Roadmap
+
+Nothing here is released. The order is the order of work.
+
+### Next: Android
+
+Today the graph needs the Swift compiler's index store, so a Kotlin or Java project cannot be indexed. The plan has two steps.
+
+1. History only. `idxg init` works without an index store and attributes changed files to modules from the Gradle directories. Commit history, pull request descriptions, releases, docs and the weekly digest then work on an Android repository. The graph tools report that no graph exists.
+2. A code graph from SCIP. `scip-java` covers Kotlin and writes the same symbol and reference data the compiler's index store does. An extractor would load it into the existing tables, so `trace`, `refs`, `impact` and `usage` need no changes. `idxg crash` also needs to read Java and Kotlin stack trace lines.
+
+### After that
+
+- `idxg usage` prints the build-file lines (BUILD, `.bzl`, `Package.swift`, `project.yml`) that name an uncompiled file, so an agent does not search the build files itself.
+- `get_schema` lists the symbol kind values in use, so a query does not return no rows because of a lowercase kind name.
+- `trace` outbound calls hide getters, setters and operators by default.
+- The vault export runs after a build when a vault is configured, and `idxg history build` re-renders the explorer.
+- A demo recording of the explorer and a crash triage in this README.
+- A pull request check. Given a git diff, it runs the signature-change and deletion checks on every changed member and prints what the change breaks.
+- Incremental graph refresh. A rebuild on a large monorepo takes about 4 minutes because it re-reads every unit, and it would re-read only the units that changed.
+- A "who knows this" view. The history already stores the author of each commit, so it can list who changed a module or file most recently and most often.
 
 ## Contributing
 
