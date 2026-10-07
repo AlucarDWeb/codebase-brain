@@ -351,9 +351,6 @@ Every MCP tool has a CLI equivalent. `idxg schema` (or `get_schema`) prints ever
 
 ## Limits
 
-- The graph is a snapshot of the last compile. Line numbers drift and new code is missing
-  until you rebuild. Files deleted from the checkout are skipped, even though the compiler's
-  index store still holds their records.
 - It only knows what was compiled. Before concluding "nothing calls this", run
   `idxg coverage <path>`: no records means "not compiled", not "not used".
 - Module attribution follows the compiled index, so per-module history counts are lower
