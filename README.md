@@ -402,11 +402,6 @@ A project skill with a `## Project notes` section is kept unless you pass `--for
 
 ## Roadmap
 
-<<<<<<< HEAD
-=======
-Nothing here is released. The iOS items come first and Android support follows. Each card is an [issue](https://github.com/AlucarDWeb/codebase-brain/issues), listed with the work in progress first, and the counts show how many issues have each status.
-
->>>>>>> 9df54f7 ([main] Put the Android items last on the roadmap)
 <div align="center">
   <a href="https://github.com/AlucarDWeb/codebase-brain/issues?q=is%3Aissue+label%3Astatus%3Adoing"><img src="docs/roadmap/status_doing.svg" alt="doing"></a>
   <a href="https://github.com/AlucarDWeb/codebase-brain/issues?q=is%3Aissue+label%3Astatus%3Anext"><img src="docs/roadmap/status_next.svg" alt="next"></a>
