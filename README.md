@@ -402,6 +402,11 @@ A project skill with a `## Project notes` section is kept unless you pass `--for
 
 ## Roadmap
 
+<<<<<<< HEAD
+=======
+Nothing here is released. The iOS items come first and Android support follows. Each card is an [issue](https://github.com/AlucarDWeb/codebase-brain/issues), listed with the work in progress first, and the counts show how many issues have each status.
+
+>>>>>>> 9df54f7 ([main] Put the Android items last on the roadmap)
 <div align="center">
   <a href="https://github.com/AlucarDWeb/codebase-brain/issues?q=is%3Aissue+label%3Astatus%3Adoing"><img src="docs/roadmap/status_doing.svg" alt="doing"></a>
   <a href="https://github.com/AlucarDWeb/codebase-brain/issues?q=is%3Aissue+label%3Astatus%3Anext"><img src="docs/roadmap/status_next.svg" alt="next"></a>
@@ -410,34 +415,34 @@ A project skill with a `## Project notes` section is kept unless you pass `--for
 </div>
 
 <div align="center">
-  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/1"><img src="docs/roadmap/issue_0.svg" alt="roadmap item 1"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/3"><img src="docs/roadmap/issue_0.svg" alt="roadmap item 1"></a>
 </div>
 <div align="center">
-  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/2"><img src="docs/roadmap/issue_1.svg" alt="roadmap item 2"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/4"><img src="docs/roadmap/issue_1.svg" alt="roadmap item 2"></a>
 </div>
 <div align="center">
-  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/3"><img src="docs/roadmap/issue_2.svg" alt="roadmap item 3"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/5"><img src="docs/roadmap/issue_2.svg" alt="roadmap item 3"></a>
 </div>
 <div align="center">
-  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/4"><img src="docs/roadmap/issue_3.svg" alt="roadmap item 4"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/6"><img src="docs/roadmap/issue_3.svg" alt="roadmap item 4"></a>
 </div>
 <div align="center">
-  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/5"><img src="docs/roadmap/issue_4.svg" alt="roadmap item 5"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/7"><img src="docs/roadmap/issue_4.svg" alt="roadmap item 5"></a>
 </div>
 <div align="center">
-  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/6"><img src="docs/roadmap/issue_5.svg" alt="roadmap item 6"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/8"><img src="docs/roadmap/issue_5.svg" alt="roadmap item 6"></a>
 </div>
 <div align="center">
-  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/7"><img src="docs/roadmap/issue_6.svg" alt="roadmap item 7"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/9"><img src="docs/roadmap/issue_6.svg" alt="roadmap item 7"></a>
 </div>
 <div align="center">
-  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/8"><img src="docs/roadmap/issue_7.svg" alt="roadmap item 8"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/10"><img src="docs/roadmap/issue_7.svg" alt="roadmap item 8"></a>
 </div>
 <div align="center">
-  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/9"><img src="docs/roadmap/issue_8.svg" alt="roadmap item 9"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/1"><img src="docs/roadmap/issue_8.svg" alt="roadmap item 9"></a>
 </div>
 <div align="center">
-  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/10"><img src="docs/roadmap/issue_9.svg" alt="roadmap item 10"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/2"><img src="docs/roadmap/issue_9.svg" alt="roadmap item 10"></a>
 </div>
 
 ## Contributing

@@ -9,4 +9,4 @@
   .muted { font-size: 12px; fill: var(--muted); }
   .count { font-size: 34px; font-weight: 600; text-anchor: middle; }
   .pill { font-size: 12px; font-weight: 600; text-anchor: middle; fill: #ffffff; }
-</style><rect class="card" x="0.5" y="0.5" width="669" height="55" rx="6"/><rect x="0.5" y="0.5" width="6" height="55" rx="3" fill="#0969da"/><text class="title" x="20" y="24">trace: hide getters, setters and operators by default</text><text class="muted" x="20" y="43">#5  ·  opened 2026-10-07</text><rect x="584" y="14" width="72" height="22" rx="11" fill="#0969da"/><text class="pill" x="620" y="29">planned</text></svg>
+</style><rect class="card" x="0.5" y="0.5" width="669" height="55" rx="6"/><rect x="0.5" y="0.5" width="6" height="55" rx="3" fill="#0969da"/><text class="title" x="20" y="24">Demo recording for the README</text><text class="muted" x="20" y="43">#7  ·  opened 2026-10-07</text><rect x="584" y="14" width="72" height="22" rx="11" fill="#0969da"/><text class="pill" x="620" y="29">planned</text></svg>

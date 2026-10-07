@@ -1,12 +1,13 @@
 """Draws the README roadmap cards from the repository's issues.
 
 Writes status_<name>.svg (a count per status label) and issue_<n>.svg (one card per open
-issue, doing first) into docs/roadmap. Run it after changing an issue's status label, then
-commit the result. Standard library only.
+issue, doing first and Android last) into docs/roadmap. Run it after changing an issue's status label, then
+commit the result. It also points the README's card links at the right issues. Standard library only.
 """
 import html
 import json
 import os
+import re
 import sys
 import urllib.request
 
@@ -88,6 +89,18 @@ def issue_card(issue, status):
     ) % (STYLE, COLORS[status], html.escape(title), html.escape(meta), COLORS[status], status)
 
 
+def relink_readme(numbers):
+    """Points each card's link at the issue it shows, since the order changes with the labels."""
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "README.md")
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    for n, number in enumerate(numbers):
+        pattern = r'(<a href=")[^"]*/issues/\d+("><img src="docs/roadmap/issue_%d\.svg")' % n
+        text = re.sub(pattern, lambda m: m.group(1) + "https://github.com/%s/issues/%d" % (REPO, number) + m.group(2), text)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
 def main(out):
     os.makedirs(out, exist_ok=True)
     found = [(status_of(i), i) for i in issues()]
@@ -98,11 +111,12 @@ def main(out):
             f.write(status_card(name, count))
     open_cards = sorted(
         [(s, i) for s, i in found if i["state"] == "open"],
-        key=lambda p: (STATUSES.index(p[0]), p[1]["number"]),
+        key=lambda p: (p[1]["title"].startswith("Android"), STATUSES.index(p[0]), p[1]["number"]),
     )[:MAX_CARDS]
     for n, (s, i) in enumerate(open_cards):
         with open(os.path.join(out, "issue_%d.svg" % n), "w", encoding="utf-8") as f:
             f.write(issue_card(i, s))
+    relink_readme([i["number"] for s, i in open_cards])
     for n in range(len(open_cards), MAX_CARDS):
         path = os.path.join(out, "issue_%d.svg" % n)
         if os.path.exists(path):
