@@ -2,8 +2,28 @@
 
 <p align="center"><img src="docs/img/logo.png" alt="codebase-brain logo" width="240"></p>
 
-A queryable brain for a Swift or Objective-C codebase, built for coding agents. It keeps
-three things about a project in one place:
+[![smoke](https://github.com/AlucarDWeb/codebase-brain/actions/workflows/smoke.yml/badge.svg)](https://github.com/AlucarDWeb/codebase-brain/actions/workflows/smoke.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A queryable brain for a Swift or Objective-C codebase, built for coding agents. It holds the compiler's code graph, the main branch's commit history and the repository's own docs.
+
+## Table of contents
+
+- [Background](#background)
+- [Install](#install)
+- [Usage](#usage)
+- [How it works](#how-it-works)
+- [API](#api)
+- [Limits](#limits)
+- [Troubleshooting](#troubleshooting)
+- [Removing a project](#removing-a-project)
+- [Source layout](#source-layout)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Background
+
+The brain keeps three things about a project in one place:
 
 - the code graph the compiler already resolved: every symbol, call, reference, override
   and conformance, each with its exact `file:line`;
@@ -14,6 +34,50 @@ You reach it three ways: as MCP tools for Claude Code, as the `idxg` CLI, and as
 explorer. Because the edges come from the compiler's index store (the same data behind
 Xcode's "jump to definition"), "who calls this" returns real resolved calls, with no
 parsing and no guessing about generics or dynamic dispatch.
+
+### Why an agent is faster with it
+
+| Task | Tokens processed in total | Tool calls | Tokens read from tools | Correct |
+|---|---|---|---|---|
+| Crash triage | 34% fewer | 24% fewer | 35% fewer | 3/3 with, 3/3 without |
+| Module architecture | 20% fewer | 8% fewer | 41% fewer | 28/30 with, 29/30 without |
+| Impact of a protocol signature change | 46% fewer | 41% fewer | 30% fewer | 30/30 with, 30/30 without |
+| What shipped in three releases | 44% fewer | 33% fewer | 68% fewer | 28/30 with, 28/30 without |
+| Migration scope of a legacy module | 48% fewer | 37% fewer | 40% fewer | 30/30 with, 27/30 without |
+| Dead code check of 10 symbols | 41% fewer | 60% fewer | 62% fewer | 30/30 with, 30/30 without |
+
+What makes the difference:
+
+- A stack trace frame resolves to the exact function, even when several files share its
+  name, so the agent never opens look-alike files to find the right one.
+- Each commit near a crash carries the release it first shipped in, untagged hotfix branches
+  included, and the opening of its pull request description, so the agent does not rebuild
+  the release history with git and `gh`.
+- The commit list covers every frame's file, so a related fix elsewhere turns up without a
+  separate search: a root-cause follow-up was reported in 3 of 3 crash triages with
+  codebase-brain and 1 of 3 without.
+- `describe_module` returns a module's layers, its dependencies (and the imports nothing
+  uses), its dependents with the symbols they call, its hotspots, and for each of its types
+  the modules that use it with the first file and line, in one call, where plain search reads
+  build files, greps imports and opens integration code.
+- The graph knows which files the build never compiles, so a file that looks like a user but
+  is not built is not counted: in the migration scope, all three answers with codebase-brain
+  caught one such file and none of the three without did.
+- `check_usage` answers "can these symbols be deleted" for a whole list in one call, including a
+  text search of the files the index never saw and the line of code at each use, so the agent
+  neither greps each name nor opens each site.
+- `impact_of` lists what a signature change breaks: implementations, call sites with their
+  code, protocol extension helpers that forward to the member, and the matching lines of files
+  the build never compiled.
+- `get_history` with several releases prints each release's cut point and every pull request
+  that first shipped in it with its what and why, so the agent neither opens each pull request
+  nor works out fork points with git.
+- Fewer and smaller steps mean the agent re-reads less of its own conversation.
+
+Following a flow through the code still means reading that code, and costs about the same
+either way. Total processed counts the conversation re-read at every turn, so it follows the
+number of turns. A stale graph reverses the gain: with a graph that still held deleted files, module architecture took
+28% more calls with codebase-brain than without it.
 
 ## Install
 
@@ -37,7 +101,7 @@ The script:
 
 Restart any Claude Code session that was already running so it sees the MCP server.
 
-## Set up a project
+### Set up a project
 
 1. Make sure the project has an index store. The compiler writes one when it builds.
    - Xcode or `xcodebuild`: build once. Nothing else to configure.
@@ -85,40 +149,17 @@ the committed block alone.
 The project skill ends with a `## Project notes` section. Anything you write there
 survives every re-init.
 
-## Using it from an agent
+## Usage
+
+### From an agent
 
 Once the MCP server is registered and a project is indexed, Claude Code picks the tools on
-its own. Every tool has a CLI equivalent.
+its own. The [API](#api) section lists them, and every tool has a CLI equivalent. Large
+answers are capped in rows and bytes and say when they were truncated, so a call never
+floods the agent's context. The MCP server finds the project from the session's working
+directory; pass `db` to query another one.
 
-| Question | MCP tool | CLI |
-|---|---|---|
-| Is the graph fresh, what does it cover | `index_status` | `idxg status` |
-| Find a symbol by words, regex, kind, module or file | `search_graph` | `idxg search` |
-| Who calls this, what does it call, override and conformance chains, with the code at each call site | `trace_path` | `idxg trace --code` |
-| Every use of a symbol, with read, write and call roles | `find_references` | `idxg refs` |
-| Read a definition from disk | `get_code_snippet` | `idxg snippet` |
-| Was this file compiled at all | `check_index_coverage` | `idxg coverage` |
-| One module: layers, what it uses, who uses it, hotspots, coverage, and which modules use each of its types | `describe_module` | `idxg module` |
-| Layers, modules, cross-module hotspots | `get_architecture` | `idxg arch` |
-| What a signature change to a method breaks: implementations, call sites, protocol extension helpers, uncompiled files | `impact_of` | `idxg impact` |
-| Can these symbols be deleted: production, tests only, or unused, with the code at each use | `check_usage` | `idxg usage` |
-| Code nothing reaches, or only tests reach | `find_dead_code` | `idxg dead`, `idxg dead --test-only` |
-| Who changed this, when, in which PR, and why | `get_history` | `idxg history log --narrate` |
-| One commit or PR in full | `get_commit` | `idxg history show` |
-| Where change concentrates | `get_churn` | `idxg history churn` |
-| What shipped in one or more releases, with each PR's what and why | `get_history` with `release` | `idxg history log --release` |
-| What shipped this week, or in one release, narrated | `get_digest` | `idxg history digest` |
-| Release tags and what first shipped in each | `get_releases` | `idxg history releases` |
-| How the project evolved, period by period | `get_timeline` | `idxg history timeline` |
-| A crash report, frame by frame | `triage_crash` | `idxg crash` |
-| The repository's docs | `list_docs`, `search_docs`, `get_doc` | `idxg docs` |
-| Any SQL over the graph | `query_graph` | `idxg sql` |
-| Rebuild the graph or the history | `refresh_index`, `refresh_history` | `idxg refresh`, `idxg history build` |
-| Tables and columns | `get_schema` | `idxg schema` |
-
-Large answers are capped in rows and bytes and say when they were truncated, so a call
-never floods the agent's context. The MCP server finds the project from the session's
-working directory; pass `db` to query another one.
+### The explorer
 
 The explorer links back to the agent: select a module or a symbol and an "ask the agent"
 box offers ready-made prompts, filled in from what is on screen, with a copy button.
@@ -136,51 +177,7 @@ and the file is also what you can send someone. On its own it holds only the mos
 default, `idxg viz --limit` changes it) and each one's strongest edges, so a missing link
 there is not proof of absence.
 
-## Why an agent is faster with it
-
-| Task | Tokens processed in total | Tool calls | Tokens read from tools | Correct |
-|---|---|---|---|---|
-| Crash triage | 34% fewer | 24% fewer | 35% fewer | 3/3 with, 3/3 without |
-| Module architecture | 20% fewer | 8% fewer | 41% fewer | 28/30 with, 29/30 without |
-| Impact of a protocol signature change | 46% fewer | 41% fewer | 30% fewer | 30/30 with, 30/30 without |
-| What shipped in three releases | 44% fewer | 33% fewer | 68% fewer | 28/30 with, 28/30 without |
-| Migration scope of a legacy module | 48% fewer | 37% fewer | 40% fewer | 30/30 with, 27/30 without |
-| Dead code check of 10 symbols | 41% fewer | 60% fewer | 62% fewer | 30/30 with, 30/30 without |
-
-What makes the difference:
-
-- A stack trace frame resolves to the exact function, even when several files share its
-  name, so the agent never opens look-alike files to find the right one.
-- Each commit near a crash carries the release it first shipped in, untagged hotfix branches
-  included, and the opening of its pull request description, so the agent does not rebuild
-  the release history with git and `gh`.
-- The commit list covers every frame's file, so a related fix elsewhere turns up without a
-  separate search: a root-cause follow-up was reported in 3 of 3 crash triages with
-  codebase-brain and 1 of 3 without.
-- `describe_module` returns a module's layers, its dependencies (and the imports nothing
-  uses), its dependents with the symbols they call, its hotspots, and for each of its types
-  the modules that use it with the first file and line, in one call, where plain search reads
-  build files, greps imports and opens integration code.
-- The graph knows which files the build never compiles, so a file that looks like a user but
-  is not built is not counted: in the migration scope, all three answers with codebase-brain
-  caught one such file and none of the three without did.
-- `check_usage` answers "can these symbols be deleted" for a whole list in one call, including a
-  text search of the files the index never saw and the line of code at each use, so the agent
-  neither greps each name nor opens each site.
-- `impact_of` lists what a signature change breaks: implementations, call sites with their
-  code, protocol extension helpers that forward to the member, and the matching lines of files
-  the build never compiled.
-- `get_history` with several releases prints each release's cut point and every pull request
-  that first shipped in it with its what and why, so the agent neither opens each pull request
-  nor works out fork points with git.
-- Fewer and smaller steps mean the agent re-reads less of its own conversation.
-
-Following a flow through the code still means reading that code, and costs about the same
-either way. Total processed counts the conversation re-read at every turn, so it follows the
-number of turns. A stale graph reverses the gain: with a graph that still held deleted files, module architecture took
-28% more calls with codebase-brain than without it.
-
-## Triage a crash
+### Triage a crash
 
 ```bash
 idxg crash crash.txt --since v1.328.0
@@ -209,7 +206,7 @@ output shows what
 changed near the crash, not why it crashed: the graph has no runtime data, so a force
 unwrap or a race is invisible to it.
 
-## Command reference
+### Command reference
 
 Every query command accepts `--json`, and `--db` to target another project, given as its
 folder or its graph file (`idxg projects` lists both). Symbols
@@ -254,7 +251,9 @@ idxg docs search "path resolver"
 idxg docs show Documentation/Testing.md
 ```
 
-## How the history works
+## How it works
+
+### The history
 
 The history lives in `<project>-history.db`, beside the graph, so rebuilding the graph never
 touches it. `idxg init` and every graph build refresh it.
@@ -277,7 +276,25 @@ touches it. `idxg init` and every graph build refresh it.
 All narration (per commit, weekly digest, timeline) is computed from fields in the
 database. It reads like a factual log, not an interpretation.
 
-## Keeping it fresh
+### Where the index store comes from
+
+`idxg-build` finds and merges every store it recognises:
+
+| Source | Path |
+|---|---|
+| Xcode, `xcodebuild` | `~/Library/Developer/Xcode/DerivedData/<Project>-<hash>/Index.noindex/DataStore` |
+| sourcekit-lsp background indexing | `.index-build/index`, `~/.sourcekit-lsp/index-build` |
+| sourcekit-bazel-bsp | `<output_base>/sourcekit-bazel-bsp/execroot/_main/bazel-out/_global_index_store` |
+| Bazel with `swift.index_while_building` | `<output_base>/execroot/_main/bazel-out/_global_index_store` |
+
+Pass `--store <path>` (repeatable) to override detection. Xcode indexes Objective-C too;
+Bazel's Swift rules do not, see [docs/objc-index-store.md](docs/objc-index-store.md).
+
+For scale: a monorepo with 790k symbols and 6.9M edges takes about 4 minutes to index and
+produces a 2.2 GB graph. Its history (18k commits, 14.7k pull requests, 369 docs) takes
+about 7 minutes the first time and 290 MB.
+
+### Keeping it fresh
 
 The background agent from `./install.sh` reindexes a project when its index store changes,
 waiting for the build to finish, and checks every 15 minutes as a fallback.
@@ -301,23 +318,35 @@ back with `idxg update --to 0.3.1` (any earlier version works) and restart Claud
 the MCP server itself cannot start, its one remaining tool prints the `git` command that does
 the same thing.
 
-## Where the index store comes from
+## API
 
-`idxg-build` finds and merges every store it recognises:
+Every MCP tool has a CLI equivalent. `idxg schema` (or `get_schema`) prints every table in both databases.
 
-| Source | Path |
-|---|---|
-| Xcode, `xcodebuild` | `~/Library/Developer/Xcode/DerivedData/<Project>-<hash>/Index.noindex/DataStore` |
-| sourcekit-lsp background indexing | `.index-build/index`, `~/.sourcekit-lsp/index-build` |
-| sourcekit-bazel-bsp | `<output_base>/sourcekit-bazel-bsp/execroot/_main/bazel-out/_global_index_store` |
-| Bazel with `swift.index_while_building` | `<output_base>/execroot/_main/bazel-out/_global_index_store` |
-
-Pass `--store <path>` (repeatable) to override detection. Xcode indexes Objective-C too;
-Bazel's Swift rules do not, see [docs/objc-index-store.md](docs/objc-index-store.md).
-
-For scale: a monorepo with 790k symbols and 6.9M edges takes about 4 minutes to index and
-produces a 2.2 GB graph. Its history (18k commits, 14.7k pull requests, 369 docs) takes
-about 7 minutes the first time and 290 MB.
+| Question | MCP tool | CLI |
+|---|---|---|
+| Is the graph fresh, what does it cover | `index_status` | `idxg status` |
+| Find a symbol by words, regex, kind, module or file | `search_graph` | `idxg search` |
+| Who calls this, what does it call, override and conformance chains, with the code at each call site | `trace_path` | `idxg trace --code` |
+| Every use of a symbol, with read, write and call roles | `find_references` | `idxg refs` |
+| Read a definition from disk | `get_code_snippet` | `idxg snippet` |
+| Was this file compiled at all | `check_index_coverage` | `idxg coverage` |
+| One module: layers, what it uses, who uses it, hotspots, coverage, and which modules use each of its types | `describe_module` | `idxg module` |
+| Layers, modules, cross-module hotspots | `get_architecture` | `idxg arch` |
+| What a signature change to a method breaks: implementations, call sites, protocol extension helpers, uncompiled files | `impact_of` | `idxg impact` |
+| Can these symbols be deleted: production, tests only, or unused, with the code at each use | `check_usage` | `idxg usage` |
+| Code nothing reaches, or only tests reach | `find_dead_code` | `idxg dead`, `idxg dead --test-only` |
+| Who changed this, when, in which PR, and why | `get_history` | `idxg history log --narrate` |
+| One commit or PR in full | `get_commit` | `idxg history show` |
+| Where change concentrates | `get_churn` | `idxg history churn` |
+| What shipped in one or more releases, with each PR's what and why | `get_history` with `release` | `idxg history log --release` |
+| What shipped this week, or in one release, narrated | `get_digest` | `idxg history digest` |
+| Release tags and what first shipped in each | `get_releases` | `idxg history releases` |
+| How the project evolved, period by period | `get_timeline` | `idxg history timeline` |
+| A crash report, frame by frame | `triage_crash` | `idxg crash` |
+| The repository's docs | `list_docs`, `search_docs`, `get_doc` | `idxg docs` |
+| Any SQL over the graph | `query_graph` | `idxg sql` |
+| Rebuild the graph or the history | `refresh_index`, `refresh_history` | `idxg refresh`, `idxg history build` |
+| Tables and columns | `get_schema` | `idxg schema` |
 
 ## Limits
 
@@ -371,6 +400,14 @@ A project skill with a `## Project notes` section is kept unless you pass `--for
 | `src/viz.py` | the HTML explorer |
 | `src/mcp_server.py` | the MCP server |
 
-`idxg schema` prints every table in both databases.
+## Contributing
 
-MIT licensed.
+The project uses the Python standard library only, so there is nothing to install. Before
+you open a pull request, run `/usr/bin/python3 tests/smoke.py` on the system Python 3.9. It
+checks that every module parses and imports and that the MCP server lists its tools, and CI
+runs the same check. Update this README and `skill/codebase-brain/SKILL.md` when a command or
+a default changes.
+
+## License
+
+[MIT](LICENSE)
