@@ -314,7 +314,7 @@ history databases need no rebuild.
 `idxg update` installs release tags only, never unreleased commits on `main`. Before it
 switches, it checks that the new release starts on your Python. If it doesn't, the update
 stops and you stay on the version you had. If a release you already installed misbehaves, go
-back with `idxg update --to 0.3.1` (any earlier version works) and restart Claude Code. When
+back with `idxg update --to 0.6.1` (any earlier version works) and restart Claude Code. When
 the MCP server itself cannot start, its one remaining tool prints the `git` command that does
 the same thing.
 
@@ -351,9 +351,8 @@ Every MCP tool has a CLI equivalent. `idxg schema` (or `get_schema`) prints ever
 ## Limits
 
 - The graph is a snapshot of the last compile. Line numbers drift and new code is missing
-  until you rebuild. The compiler's index store also keeps every file it ever compiled,
-  including deleted files and files from branches you built once; the build skips any whose
-  source is no longer in the checkout, so a rebuild on `main` describes `main`.
+  until you rebuild. Files deleted from the checkout are skipped, even though the compiler's
+  index store still holds their records.
 - It only knows what was compiled. Before concluding "nothing calls this", run
   `idxg coverage <path>`: no records means "not compiled", not "not used".
 - Module attribution follows the compiled index, so per-module history counts are lower
@@ -391,13 +390,16 @@ A project skill with a `## Project notes` section is kept unless you pass `--for
 |---|---|
 | `src/idxstore.py` | ctypes bindings for `libIndexStore.dylib` |
 | `src/build.py` | parallel extractor and SQLite writer |
+| `src/project.py` | project registry, store detection, config and staleness |
 | `src/history.py` | git log, PR descriptions, docs, narration, digest, timeline, vault export |
 | `src/crash.py` | stack trace parsing and frame resolution |
+| `src/deadcode.py` | the dead-code candidate query |
 | `src/modulecard.py` | the module card behind `idxg module` |
 | `src/usage.py` | the deletion check behind `idxg usage` |
 | `src/impact.py` | the signature-change check behind `idxg impact` |
 | `src/idxg.py` | the CLI and query layer |
 | `src/viz.py` | the HTML explorer |
+| `src/serve.py` | the local server behind `idxg open` |
 | `src/mcp_server.py` | the MCP server |
 
 ## Contributing
