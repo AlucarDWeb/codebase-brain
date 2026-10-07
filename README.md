@@ -402,8 +402,6 @@ A project skill with a `## Project notes` section is kept unless you pass `--for
 
 ## Roadmap
 
-Nothing here is released. Android support is next. Each card is an [issue](https://github.com/AlucarDWeb/codebase-brain/issues), listed with the work in progress first, and the counts show how many issues have each status.
-
 <div align="center">
   <a href="https://github.com/AlucarDWeb/codebase-brain/issues?q=is%3Aissue+label%3Astatus%3Adoing"><img src="docs/roadmap/status_doing.svg" alt="doing"></a>
   <a href="https://github.com/AlucarDWeb/codebase-brain/issues?q=is%3Aissue+label%3Astatus%3Anext"><img src="docs/roadmap/status_next.svg" alt="next"></a>
@@ -441,8 +439,6 @@ Nothing here is released. Android support is next. Each card is an [issue](https
 <div align="center">
   <a href="https://github.com/AlucarDWeb/codebase-brain/issues/10"><img src="docs/roadmap/issue_9.svg" alt="roadmap item 10"></a>
 </div>
-
-The cards are drawn from the issues' `status:` labels. After you change a label, run `python3 .github/scripts/roadmap_svgs.py` and commit `docs/roadmap/`.
 
 ## Contributing
 
