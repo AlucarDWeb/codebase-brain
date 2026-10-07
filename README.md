@@ -405,25 +405,47 @@ A project skill with a `## Project notes` section is kept unless you pass `--for
 
 ## Roadmap
 
-Nothing here is released. The order is the order of work.
+Nothing here is released. Android support is next. Each card is an [issue](https://github.com/AlucarDWeb/codebase-brain/issues), listed with the work in progress first, and the counts show how many issues have each status.
 
-### Next: Android
+<div align="center">
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues?q=is%3Aissue+label%3Astatus%3Adoing"><img src="docs/roadmap/status_doing.svg" alt="doing"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues?q=is%3Aissue+label%3Astatus%3Anext"><img src="docs/roadmap/status_next.svg" alt="next"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues?q=is%3Aissue+label%3Astatus%3Aplanned"><img src="docs/roadmap/status_planned.svg" alt="planned"></a>
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues?q=is%3Aissue+label%3Astatus%3Adone"><img src="docs/roadmap/status_done.svg" alt="done"></a>
+</div>
 
-Today the graph needs the Swift compiler's index store, so a Kotlin or Java project cannot be indexed. The plan has two steps.
+<div align="center">
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/1"><img src="docs/roadmap/issue_0.svg" alt="roadmap item 1"></a>
+</div>
+<div align="center">
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/2"><img src="docs/roadmap/issue_1.svg" alt="roadmap item 2"></a>
+</div>
+<div align="center">
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/3"><img src="docs/roadmap/issue_2.svg" alt="roadmap item 3"></a>
+</div>
+<div align="center">
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/4"><img src="docs/roadmap/issue_3.svg" alt="roadmap item 4"></a>
+</div>
+<div align="center">
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/5"><img src="docs/roadmap/issue_4.svg" alt="roadmap item 5"></a>
+</div>
+<div align="center">
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/6"><img src="docs/roadmap/issue_5.svg" alt="roadmap item 6"></a>
+</div>
+<div align="center">
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/7"><img src="docs/roadmap/issue_6.svg" alt="roadmap item 7"></a>
+</div>
+<div align="center">
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/8"><img src="docs/roadmap/issue_7.svg" alt="roadmap item 8"></a>
+</div>
+<div align="center">
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/9"><img src="docs/roadmap/issue_8.svg" alt="roadmap item 9"></a>
+</div>
+<div align="center">
+  <a href="https://github.com/AlucarDWeb/codebase-brain/issues/10"><img src="docs/roadmap/issue_9.svg" alt="roadmap item 10"></a>
+</div>
 
-1. History only. `idxg init` works without an index store and attributes changed files to modules from the Gradle directories. Commit history, pull request descriptions, releases, docs and the weekly digest then work on an Android repository. The graph tools report that no graph exists.
-2. A code graph from SCIP. `scip-java` covers Kotlin and writes the same symbol and reference data the compiler's index store does. An extractor would load it into the existing tables, so `trace`, `refs`, `impact` and `usage` need no changes. `idxg crash` also needs to read Java and Kotlin stack trace lines.
-
-### After that
-
-- `idxg usage` prints the build-file lines (BUILD, `.bzl`, `Package.swift`, `project.yml`) that name an uncompiled file, so an agent does not search the build files itself.
-- `get_schema` lists the symbol kind values in use, so a query does not return no rows because of a lowercase kind name.
-- `trace` outbound calls hide getters, setters and operators by default.
-- The vault export runs after a build when a vault is configured, and `idxg history build` re-renders the explorer.
-- A demo recording of the explorer and a crash triage in this README.
-- A pull request check. Given a git diff, it runs the signature-change and deletion checks on every changed member and prints what the change breaks.
-- Incremental graph refresh. A rebuild on a large monorepo takes about 4 minutes because it re-reads every unit, and it would re-read only the units that changed.
-- A "who knows this" view. The history already stores the author of each commit, so it can list who changed a module or file most recently and most often.
+The cards are drawn from the issues' `status:` labels. After you change a label, run `python3 .github/scripts/roadmap_svgs.py` and commit `docs/roadmap/`.
 
 ## Contributing
 
