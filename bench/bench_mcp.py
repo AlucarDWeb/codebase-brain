@@ -88,6 +88,7 @@ CALLS = [
     ("find_dead_code", {"test_only": True, "limit": 20}),
     ("get_churn", {}),
     ("get_migrations", {}),
+    ("track_migration", {"name": "bench", "uses": MODULE}),
     ("get_timeline", {"periods": 3}),
     ("list_docs", {"kind": "readme"}),
     ("search_docs", {"query": "architecture"}),

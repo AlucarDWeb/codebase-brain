@@ -13,18 +13,18 @@ the CLI stayed `idxg`.
 | `src/idxstore.py` | 112 | ctypes bindings for `libIndexStore.dylib`: units, records, occurrences, symbol relations |
 | `src/build.py` | 574 | parallel extractor, SQLite writer, atomic swap, registry update |
 | `src/project.py` | 411 | project registry, store detection, layered config, staleness |
-| `src/idxg.py` | 2814 | the CLI: every subcommand, plus the shared query helpers |
-| `src/viz.py` | 2763 | HTML explorer: data slicing and the whole page as one Python string |
+| `src/idxg.py` | 2887 | the CLI: every subcommand, plus the shared query helpers |
+| `src/viz.py` | 2811 | HTML explorer: data slicing and the whole page as one Python string |
 | `src/serve.py` | 240 | local HTTP server behind `idxg open`: serves the explorer and answers every tab's lookups (symbols, neighbours, kinds, dead code, doc full text) from the whole db, read-only |
 | `src/deadcode.py` | 132 | dead-code candidate query and its text cross-check |
 | `src/modulecard.py` | 264 | `describe_module`: a module's folder and layers, used and imported-only dependencies, dependents with the symbols they use, type connectivity ranking, coverage, the files that import it, and per type the modules that use it with a first site (an integration target counted as the module whose folder holds it), top-level typealiases, and type names other modules share |
 | `src/usage.py` | 140 | `check_usage`: per symbol, graph uses (and uses through implemented requirements) split production/tests, plus `git grep` over tracked files the build never indexed, into one verdict; each use shown with its enclosing symbol and line of code |
 | `src/impact.py` | 133 | `impact_of`: a member's implementations and overrides, calls of it or of them, other members of its protocol's extensions, and the matching lines of tracked files the build never compiled that name its type |
 | `src/history.py` | 1790 | git log, PR descriptions (via `gh`) and repo docs into `<project>-history.db`; module attribution via the graph; releases from tags and `release/<version>` branches, hotfix picks by patch id; per-commit narration, weekly digest, timeline, vault export |
-| `src/migrations.py` | 512 | tracked removals (imports of modules, files under a path, matching lines): definitions in the local registry, weekly counts on the history branch derived from one count at the start plus every commit's change, the commits that moved the count, what is left by module |
+| `src/migrations.py` | 1061 | tracked removals: git counts (imports, a path, a pattern) weekly on the history branch, derived from one count at the start plus every commit's change; graph counts (uses of modules, subclasses and conformers of types) once per build; Jira tickets merged per commit; what is left by module; definitions in the local registry |
 | `src/crash.py` | 260 | stack trace parsing (Apple, lldb, Sentry, free text), frame resolution by file:line (checked against the frame's function name) or by typed name, callers, the fork point of a `--since` ref |
 | `src/templates/weekly-digest.html` | | the knowledge vault's fixed digest layout, copied verbatim; only `{{TITLE}}` and `{{DIGEST_JSON}}` are substituted |
-| `src/mcp_server.py` | 494 | stdio MCP server wrapping the CLI functions, with start-up `INSTRUCTIONS` that tell an agent where to begin |
+| `src/mcp_server.py` | 530 | stdio MCP server wrapping the CLI functions, with start-up `INSTRUCTIONS` that tell an agent where to begin |
 | `bench/bench_mcp.py` | | latency and payload size per MCP tool |
 | `tests/smoke.py` | | every module parses and imports, and the MCP server lists its tools; CI runs it on 3.9 and the latest Python |
 
@@ -179,6 +179,19 @@ roles: `CALLS` (calledBy), `REFERENCES` (containedBy), `CONTAINS` (childOf), `IN
   says the commit list is incomplete. The done date comes from the commit that brought the count
   to zero for good, only when the two agree. Definitions live in the project registry on this
   machine, never in the repo, and store an absolute `since`, so the start count never drifts.
+- **Graph counts cannot be redone.** The graph keeps no past, so `--uses` and `--inherits` gain
+  one sample per build and a lost sample is lost. `measure_hash` leaves out tickets and the epic
+  so editing those never wipes samples; changing the measure itself does, and `add` says so.
+- **Count uses from occurrences, never from edges.** RxSwift's `extension NSObject:
+  ReactiveCompatible` puts an implicit `rx` on every NSObject subclass; as edges that was 14,493
+  of Wallapop's uses of RxSwift and made 5,442 files "use" it without importing it. Occurrences
+  carry the implicit role bit (256), so `graph_uses` drops those along with declarations.
+- **The agent proposes, the user saves.** `track_migration` is a dry run unless `dry_run` is
+  false, and the start-up `INSTRUCTIONS` and the skill tell an agent to show the preview first.
+  Choosing the measure is a judgment, so the card always prints exactly what it counts and where.
+- **A type name is never guessed.** `View` names 16 types on Wallapop (SwiftUI's protocol,
+  CommonUI's class, nested enums); `resolve_types` lists them and wants `Module.Name`, and `add`
+  stores the USR so a later type of the same name cannot change what is counted.
 - **The vault export is append-only.** `_write_clipping` never rewrites a file; a changed
   source becomes a date-suffixed clipping and the state file records which. That is the
   contract the knowledge vaults compile from, so a re-run must produce zero new files when

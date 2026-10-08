@@ -209,29 +209,61 @@ unwrap or a race is invisible to it.
 
 ### Track a migration
 
-A migration here is something the team wants gone: every import of a module, every file
-under a folder, or every line matching a pattern. Tell `idxg` what to count and it follows
-the count week by week on the history branch:
+A migration here is something the team wants gone. Tell `idxg` what to count and it follows
+the count down to zero. There are two sources for the count, and a ticket list on top:
 
 ```bash
+# text in git, counted once a week on the history branch, with the commits that moved it
 idxg migrations add "RxSwift removal" --imports RxSwift,RxCocoa,RxRelay
 idxg migrations add "Kernel removal" --path Modules/Legacy/Kernel
 idxg migrations add "Observables" --pattern 'Observable<' --since 2026-01-01
+
+# the code graph, counted at every graph build from today on
+idxg migrations add "RxSwift uses" --uses RxSwift,RxCocoa,RxRelay
+idxg migrations add "UIKit screens" --inherits UIKit.UIViewController
+
+# the planned work: Jira keys, each merged once a commit on main names it
+idxg migrations add "Kernel removal" --tickets WPA-117150 WPA-117151 WPA-117152
+
+# limited to one area, previewed before anything is saved
+idxg migrations add "Search SwiftUI" --inherits UIKit.UIViewController --in SearchFeature --dry-run
+
 idxg migrations                                # one line per migration
 idxg migrations show rx                        # the full report
 ```
 
 ```
 Kernel removal: done: 2,068 imports on 2025-10-08, none since 2026-09-30 with e85ad54ffc5 (#22089)
+    tickets: all 9 tickets have a merged commit; the last to get one was WPA-117158 on 2026-09-30
 RxSwift removal: 5,095 imports left, 251 more than the 4,844 on 2025-10-08
+RxSwift uses: 0% done: 18,130 uses left of 18,130 on 2026-10-08
 ```
 
-`show` and the explorer's migrations tab add the weekly counts as a chart, what is left by
-module (with how much of it sits in test files), and every commit that moved the count,
-with what it removed or added, its pull request and its release. Definitions live in this
-machine's config, never in the repository. Each one keeps the start date it was added
-with (a year back unless you pass `--since`), so the starting count never drifts.
-`idxg history build` brings the counts up to date, reading only the commits since the last run.
+The git counts go back as far as `--since` (a year by default) and come with every commit
+that changed them. The graph counts what the compiler resolved, so an import nobody uses
+does not count (916 files on Wallapop import an Rx module and never use it) and `--inherits`
+follows subclasses of subclasses and conformances declared in extensions. The graph keeps no
+past, though: a graph count starts on the day you add it, gains a point at every build, and
+says when the build came from a branch other than `main`. Tickets add a second bar to any
+migration, or stand alone. "Merged" means a commit on `main` names the ticket in its subject
+or its pull request title; whether Jira calls it done is not in git.
+
+Any measure but `--path` takes `--in` with modules or folders, for a migration that covers one
+area. `--dry-run` prints what the definition would count today, and where, without saving it.
+
+The easiest way to track one is to ask the agent: "track the SwiftUI migration of Search". It
+finds the area with the graph tools, picks the measure, reads the epic's tickets through the
+Atlassian tools when they are connected, and calls `track_migration`, which is a dry run unless
+told otherwise. It shows you what it would count and saves only after you agree. The tab has
+that prompt ready to copy.
+
+`show` and the explorer's migrations tab add the counts as a chart, what is left by module
+(with how much of it sits in test files), the commits or tickets with their pull requests and
+releases, and ask-the-agent prompts, one of which fetches an epic's tickets through the
+Atlassian tools. Running `add` again with the same name changes only what you pass; a ticket
+list replaces the earlier one, and `--no-tickets` drops it. Definitions live in this machine's
+config, never in the repository. `idxg history build` brings everything up to date, reading
+only the commits since the last run.
 
 ### Command reference
 
@@ -372,6 +404,7 @@ Every MCP tool has a CLI equivalent. `idxg schema` (or `get_schema`) prints ever
 | Release tags and what first shipped in each | `get_releases` | `idxg history releases` |
 | How the project evolved, period by period | `get_timeline` | `idxg history timeline` |
 | How far a tracked migration has got, what is left by module, which commits moved it | `get_migrations` | `idxg migrations show` |
+| Track a migration the user describes, after a dry run they approve | `track_migration` | `idxg migrations add --dry-run`, then without it |
 | A crash report, frame by frame | `triage_crash` | `idxg crash` |
 | The repository's docs | `list_docs`, `search_docs`, `get_doc` | `idxg docs` |
 | Any SQL over the graph | `query_graph` | `idxg sql` |
@@ -387,9 +420,9 @@ Every MCP tool has a CLI equivalent. `idxg schema` (or `get_schema`) prints ever
 - `--symbol` history follows the file that defines the symbol, so unrelated edits to that
   file show up too.
 - Each checkout gets its own database, because Bazel output bases differ per worktree.
-- A migration counts text in git, not the graph: an import that is still there but no longer
-  used counts as left, and code moved to a replacement counts as progress only once the old
-  import or file is gone.
+- A git migration (`--imports`, `--path`, `--pattern`) counts text, so an unused import counts
+  as left. A graph migration (`--uses`, `--inherits`) counts compiled code only and starts on the
+  day it is added. A ticket counts as merged when a commit names it, not when Jira closes it.
 
 ## Troubleshooting
 

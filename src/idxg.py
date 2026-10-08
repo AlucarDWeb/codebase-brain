@@ -1814,11 +1814,15 @@ def cmd_migrations_list(a):
         return
     if not names and not pending:
         print("no migrations tracked yet. Add one, for example:\n"
-              "  idxg migrations add \"RxSwift removal\" --imports RxSwift,RxCocoa,RxRelay\n"
-              "  idxg migrations add \"Kernel removal\" --path Modules/Legacy/Kernel")
+              "  idxg migrations add \"RxSwift removal\" --imports RxSwift,RxCocoa,RxRelay   # git, weekly\n"
+              "  idxg migrations add \"RxSwift uses\" --uses RxSwift,RxCocoa,RxRelay         # code graph, per build\n"
+              "  idxg migrations add \"UIKit screens\" --inherits UIKit.UIViewController\n"
+              "  idxg migrations add \"Kernel removal\" --path Modules/Legacy/Kernel --tickets WPA-1 WPA-2")
         return
     for n in names:
-        print(f"{n}: {mig.headline(mig.summary(hdb, n, 0, 0))}")
+        sm = mig.summary(hdb, n, 0, 0)
+        tickets = f"\n    tickets: {mig.ticket_line(sm['tickets'])}" if sm["tickets"] and sm["kind"] != "tickets" else ""
+        print(f"{n}: {mig.headline(sm)}{tickets}")
     for n in pending:
         print(f"{n}: not counted yet; idxg history build counts it")
     print("\n  idxg migrations show <name> lists what is left by module and the commits that moved it")
@@ -1838,21 +1842,74 @@ def cmd_migrations_add(a):
     hist, mig = _history_module(), _migrations_module()
     graph = db_path(a.db)
     root, _ = _history_config(a)
+    before = prj.migrations_for(root)
+    old = next((m for m in before if m.get("name") == a.name), None)
+    given = {k: getattr(a, k) for k in mig.MEASURES if getattr(a, k)}
+    tickets = mig.split_list(a.tickets)
+    if a.tickets_file:
+        with open(os.path.expanduser(a.tickets_file)) as f:
+            tickets += hist.TICKET_RE.findall(f.read())
+    # Re-adding a name changes only what is passed; the rest of the old definition stays.
+    raw = dict(old or {}, name=a.name)
+    if given:
+        new_kind, old_kind = next(iter(given)), mig.kind_of(old) if old else None
+        for k in mig.MEASURES + ("inherits_usr",):
+            raw.pop(k, None)
+        if new_kind not in ("imports", "pattern"):
+            raw.pop("files", None)
+        # A git count keeps its start date; a graph count starts today and a ticket list has none.
+        if new_kind in mig.GRAPH_KINDS or old_kind in mig.GRAPH_KINDS + ("tickets",):
+            raw.pop("since", None)
+        raw.update(given)
+    if a.files:
+        raw["files"] = a.files
+    if a.since:
+        raw["since"] = a.since
+    if tickets:
+        raw["tickets"] = tickets
+    if a.epic:
+        raw["epic"] = a.epic
+    if a.no_tickets:
+        raw.pop("tickets", None)
+        raw.pop("epic", None)
+    kind = mig.kind_of(raw)
+    hp = hist.history_db_for(graph)
+    branch = (hist.meta(hist.connect(hp)).get("branch") if os.path.exists(hp) else None) or hist.resolve_branch(root)
+    if getattr(a, "scope", None):
+        scoped = mig.resolve_scope(root, branch, graph, a.scope)
+        raw["in"], raw["in_paths"] = [n for n, _ in scoped], [f for _, f in scoped]
+    elif kind not in ("imports", "pattern", "uses", "inherits"):
+        raw.pop("in", None)
+        raw.pop("in_paths", None)
+    if a.since and kind in mig.GRAPH_KINDS:
+        raise SystemExit("--since does not apply to --uses or --inherits: the code graph keeps no past, "
+                         "so their counts start with the graph of today and gain one at every build")
+    if kind in mig.GRAPH_KINDS and not os.path.exists(graph):
+        raise SystemExit(f"no code graph at {graph}; idxg-build first")
+    if kind == "inherits" and "inherits" in given:
+        resolved = mig.resolve_types(graph, mig.split_list(given["inherits"]))
+        raw["inherits"] = [n for n, _ in resolved]
+        raw["inherits_usr"] = [u for _, u in resolved]
     try:
-        spec = mig.normalize({"name": a.name, "imports": a.imports, "path": a.path, "pattern": a.pattern,
-                              "files": a.files, "since": a.since})
+        spec = mig.normalize(raw)
     except (ValueError, re.error) as e:
         raise SystemExit(f"cannot track {a.name!r}: {e}")
-    before = prj.migrations_for(root)
+    if getattr(a, "dry_run", False):
+        if not os.path.exists(hp):
+            raise SystemExit("no history db yet; idxg history build first")
+        print(mig.preview(root, branch, graph, hp, spec))
+        return
+    if old and kind in mig.GRAPH_KINDS and mig.measure_hash(mig.normalize(old)) != mig.measure_hash(spec):
+        print("  the new measure starts its counts over; the graph cannot recount past builds")
     items = [m for m in before if m.get("name") != spec["name"]] + [spec]
     prj.save_migrations(root, items)
-    verb = "updated" if len(items) == len(before) else "tracking"
-    print(f"{verb} {spec['name']}: {mig.describe(spec)}, from {spec['since']}")
-    hp = hist.history_db_for(graph)
+    print(f"{'updated' if old else 'tracking'} {spec['name']}: {mig.describe(spec)}"
+          + (f", from {spec['since']}" if kind in mig.GIT_KINDS else ""))
+    if kind != "tickets" and spec.get("tickets"):
+        print(f"  with {mig.describe_tickets(spec)}")
     if not os.path.exists(hp):
         print("  no history db yet; idxg history build counts it")
         return
-    branch = hist.meta(hist.connect(hp)).get("branch") or hist.resolve_branch(root)
     mig.refresh(hp, root, branch, graph, items)
     print()
     print(mig.report_text(mig.summary(hist.connect(hp), spec["name"]), commits=10, left=10))
@@ -2019,6 +2076,8 @@ from https://github.com/AlucarDWeb/codebase-brain and run `idxg init` here.
 - Largest modules: {', '.join(mods[:12])}.
 
 Explorer: `idxg open` (overview, module graph, symbols, dead code, history, migrations, docs).
+To track a migration, ask for it in words ("track the SwiftUI migration of Search"); the agent
+previews it with `track_migration` and saves it once you agree.
 
 {NOTES_MARKER}
 
@@ -2687,16 +2746,30 @@ def build_parser():
     m.add_argument("--left", type=int, default=20, help="modules listed in what is left")
     m.add_argument("--json", action="store_true")
     m.set_defaults(mfn=cmd_migrations_show)
-    m = ms.add_parser("add", help="start tracking one; stored in this machine's config, never in the repo")
-    m.add_argument("name", help="what to call it, e.g. \"RxSwift removal\"")
-    g = m.add_mutually_exclusive_group(required=True)
-    g.add_argument("--imports", help="comma-separated modules whose import lines should reach zero")
-    g.add_argument("--path", help="a directory whose tracked files should reach zero")
+    m = ms.add_parser("add", help="start tracking one, or change one; stored in this machine's config, never in the repo")
+    m.add_argument("name", help="what to call it, e.g. \"RxSwift removal\"; an existing name keeps what you do not pass")
+    g = m.add_mutually_exclusive_group()
+    g.add_argument("--imports", help="comma-separated modules whose import lines should reach zero (git, weekly)")
+    g.add_argument("--path", help="a directory whose tracked files should reach zero (git, weekly)")
     g.add_argument("--pattern", help="an extended regex, as git grep -E reads it, whose matching lines should reach zero")
+    g.add_argument("--uses", help="comma-separated modules whose uses the compiler resolved should reach zero "
+                                  "(code graph, one count per build from today)")
+    g.add_argument("--inherits", help="comma-separated types (Module.Name when a name is shared) whose subclasses "
+                                      "and conforming types should reach zero (code graph, from today)")
     m.add_argument("--files", nargs="+", metavar="PATHSPEC",
                    help="git pathspecs searched by --imports and --pattern (default *.swift *.m *.mm *.h; "
                         "':(exclude)Pods' works)")
-    m.add_argument("--since", help="YYYY-MM-DD the count starts from (default: a year ago today)")
+    m.add_argument("--since", help="YYYY-MM-DD the git count starts from (default: a year ago today)")
+    m.add_argument("--tickets", nargs="+", metavar="KEY",
+                   help="Jira keys of the planned work, the full list (it replaces an earlier one); each counts as "
+                        "merged once a commit on the history branch names it")
+    m.add_argument("--tickets-file", help="a file to read ticket keys from, e.g. an exported epic")
+    m.add_argument("--epic", help="the epic the tickets belong to, shown with them")
+    m.add_argument("--no-tickets", action="store_true", help="drop the ticket list and the epic")
+    m.add_argument("--in", dest="scope", metavar="AREA",
+                   help="comma-separated modules or folders the count is limited to, e.g. SearchFeature")
+    m.add_argument("--dry-run", action="store_true",
+                   help="print what it would count today, with the start count and where, and save nothing")
     m.set_defaults(mfn=cmd_migrations_add)
     m = ms.add_parser("remove", help="stop tracking one and drop its counts")
     m.add_argument("name")

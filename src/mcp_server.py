@@ -30,6 +30,7 @@ Where to start:
 - Who changed X and why: get_history with narrate. What one or more releases shipped, with each PR's what and why: get_history with release (comma-separated tags) and a path or module; get_digest with release for a narrated digest.
 - What the repo's own docs say: search_docs, then get_doc.
 - How far a tracked migration or removal has got (RxSwift, a legacy module), what is left and which commits moved it: get_migrations.
+- The user asks to track a migration ("track the SwiftUI migration of Search"): find the area with describe_module or search_graph, pick the measure, read the epic's tickets with the Atlassian tools when they are connected, call track_migration (a dry run by default), show the user what it would count, and save with dry_run false only after they agree.
 - Anything else: query_graph with SQL, after get_schema.
 
 The graph is a snapshot of the last compile: index_status says whether it is behind and how much of the repo it covers. A file with no index records was never compiled, so search its text instead; check_usage does that search for you."""
@@ -264,16 +265,43 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "limit": {"type": "integer", "default": 30}, "db": DB_ARG}}},
     {"name": "get_migrations",
-     "description": "Tracked migrations (removals the user set up with idxg migrations add: imports of a "
-                    "module, files under a path, or matching lines, counted weekly on the history branch). "
-                    "Without name: one line per migration with progress or the day it reached zero. With "
-                    "name: start, now and peak counts, the change over 4 and 12 weeks, what is left by "
-                    "module (with how much is in test files), and the commits that moved the count, each "
-                    "with its signed change, PR and release.",
+     "description": "Tracked migrations (removals the user set up with idxg migrations add): imports of a "
+                    "module, files under a path or matching lines counted weekly on the history branch; uses "
+                    "of a module or subclasses of a type counted from the code graph at every build; and "
+                    "optionally the Jira tickets of the plan, each merged once a commit names it. Without "
+                    "name: one line per migration with progress or the day it reached zero. With name: start, "
+                    "now and peak counts, the change over 4 and 12 weeks, what is left by module (with how much "
+                    "is in test files), the commits that moved a git count with their PR and release, and per "
+                    "ticket its commits and PRs.",
      "inputSchema": {"type": "object", "properties": {
          "name": {"type": "string", "description": "one migration, by name or a unique part of it"},
          "commits": {"type": "integer", "default": 20}, "left": {"type": "integer", "default": 15},
          "db": DB_ARG}}},
+    {"name": "track_migration",
+     "description": "Save, change or remove a tracked migration the user asked for (the same as idxg "
+                    "migrations add or remove). It runs as a dry run unless dry_run is false: call it "
+                    "first as a dry run, show the user what it would count and where, and save only after "
+                    "they agree. Pick one measure for what is going away: uses (a library or module, from "
+                    "the code graph), inherits (screens or types being rewritten: subclasses and conformers "
+                    "of a type, Module.Name when the name is shared), imports (a module's import lines, "
+                    "counted weekly in git with a year of history), path (a folder being emptied) or pattern "
+                    "(an idiom, an extended regex). Limit it with in when the migration covers one area. Add "
+                    "the Jira keys of the epic's tickets, the full list, with tickets. Saving a name again "
+                    "changes only what is passed.",
+     "inputSchema": {"type": "object", "properties": {
+         "name": {"type": "string", "description": "what to call it, e.g. Search SwiftUI"},
+         "uses": {"type": "string", "description": "comma-separated modules"},
+         "inherits": {"type": "string", "description": "comma-separated types, e.g. UIKit.UIViewController"},
+         "imports": {"type": "string", "description": "comma-separated modules"},
+         "path": {"type": "string"}, "pattern": {"type": "string"},
+         "in": {"type": "string", "description": "comma-separated modules or folders the count is limited to"},
+         "files": {"type": "array", "items": {"type": "string"},
+                   "description": "git pathspecs for imports and pattern, default *.swift *.m *.mm *.h"},
+         "since": {"type": "string", "description": "YYYY-MM-DD start of a git count, default a year ago"},
+         "tickets": {"type": "string", "description": "space- or comma-separated Jira keys, the full list"},
+         "epic": {"type": "string"}, "no_tickets": {"type": "boolean"},
+         "remove": {"type": "boolean", "description": "stop tracking it"},
+         "dry_run": {"type": "boolean", "default": True}, "db": DB_ARG}, "required": ["name"]}},
     {"name": "get_churn",
      "description": "Where change concentrates: commits, lines and authors per module, component "
                     "directory, file or author over a window (default the last 365 days).",
@@ -421,6 +449,14 @@ def call(name, a):
             return run(idxg.cmd_migrations_show, ns(db=db, name=a["name"], commits=a.get("commits", 20),
                                                     left=a.get("left", 15)))
         return run(idxg.cmd_migrations_list, ns(db=db))
+    if name == "track_migration":
+        if a.get("remove"):
+            return run(idxg.cmd_migrations_remove, ns(db=db, name=a["name"]))
+        return run(idxg.cmd_migrations_add, ns(
+            db=db, name=a["name"], imports=a.get("imports"), path=a.get("path"), pattern=a.get("pattern"),
+            uses=a.get("uses"), inherits=a.get("inherits"), scope=a.get("in"), files=a.get("files"),
+            since=a.get("since"), tickets=[a["tickets"]] if a.get("tickets") else None, tickets_file=None,
+            epic=a.get("epic"), no_tickets=bool(a.get("no_tickets")), dry_run=a.get("dry_run", True) is not False))
     if name == "get_churn":
         return run(idxg.cmd_history_churn, ns(db=db, since=a.get("since"), by=a.get("by", "module"),
                                               ext=a.get("ext"), limit=a.get("limit", 25)))

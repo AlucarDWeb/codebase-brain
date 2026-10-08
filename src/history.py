@@ -458,7 +458,7 @@ def build(root, graph_db, branch=None, first_parent=True, full=False, since=None
                    tuple(release_branches or RELEASE_BRANCH_PREFIXES), log=log)
     _sync_picks(db, root, branch, log=log)
     import migrations
-    migrations.sync(db, root, branch, head, mapper, prj.migrations_for(root), log=log)
+    migrations.sync(db, root, branch, head, mapper, prj.migrations_for(root), log=log, graph_db=graph_db)
     if docs:
         sync_docs(db, root, branch, mapper, manifest_path, log=log)
     if prs:

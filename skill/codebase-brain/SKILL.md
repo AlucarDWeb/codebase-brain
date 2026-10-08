@@ -42,6 +42,7 @@ below only when the server is not connected or when a flag has no tool equivalen
 | which release first shipped a change, what is in one or more releases | `idxg history log <path> --release <tag>,<tag>` (MCP `get_history` with `release`: cut points, windows, picks, each PR's what and why), `idxg history releases`, `idxg history digest --release <tag>` |
 | code only tests keep alive | `idxg dead --test-only` (MCP `find_dead_code` with `test_only`) |
 | how far a migration or removal has got (RxSwift, a legacy module), what is left by module, which commits moved it | `idxg migrations show <name>` (MCP `get_migrations`); `idxg migrations` lists them |
+| the user asks to track a migration ("track the SwiftUI migration of Search") | MCP `track_migration`: a dry run first, shown to the user, saved with `dry_run: false` only after they agree (`idxg migrations add ... --dry-run`) |
 
 ## Commands
 
@@ -82,6 +83,8 @@ idxg history vault --out <vault dir>                  # clippings for a knowledg
 idxg migrations                                       # tracked migrations, one line each
 idxg migrations show "RxSwift removal"                # progress, weekly counts, what is left, commits
 idxg migrations add "Kernel removal" --path Modules/Legacy/Kernel   # or --imports A,B, or --pattern RE
+idxg migrations add "RxSwift uses" --uses RxSwift     # from the code graph; --inherits UIKit.UIViewController
+idxg migrations add "Kernel removal" --tickets WPA-1 WPA-2   # the plan, merged once a commit names a key
 idxg deinit --purge                                   # un-index a project completely
 ```
 
@@ -229,13 +232,24 @@ Treat the output as the list of places and pull requests to read first.
   `source: repo-doc` or `source: git-history` frontmatter and never rewrites a file; a
   changed source becomes a date-suffixed clipping. Closed periods are stable, so only the
   current period and changed docs produce new files on re-run.
-- **Migrations are counted in git, not in the graph.** Each one is the user's own
-  definition (imports of modules, files under a path, or lines matching a pattern), kept in
-  this machine's config, counted on the history branch at each week's last commit since its
-  start date. The commits listed are the ones whose diff changed the count, each with what it
-  removed or added; their sum reconciles with the weekly counts, and the report says when it
-  does not. An import that is still written but no longer used counts as left. Add or remove
-  definitions only when the user asks; `get_migrations` is read-only.
+- **Migrations are counted three ways.** Each is the user's own definition, kept in this
+  machine's config. `--imports`, `--path` and `--pattern` count text in git at each week's
+  last commit on the history branch since a start date, with the commits whose diff changed the
+  count (their sum reconciles with the weekly counts, and the report says when it does not); an
+  unused import counts as left. `--uses` and `--inherits` count the code graph at each build:
+  written uses only (implicit members such as RxSwift's `rx` on every NSObject are excluded),
+  compiled files only, from the day they were added, and the report says when the last build
+  came from another branch. `--tickets` adds the plan: a ticket is merged once a commit on the
+  history branch names it, which is not the same as done in Jira. To fill a ticket list, read
+  the epic's children with the Atlassian tools. `--in` limits any measure but `--path` to
+  modules or folders.
+- **Tracking a migration the user names.** Find the area (`describe_module`, `search_graph`),
+  pick the measure for what is going away: a library or module, `uses` (and `imports` when a
+  year of history matters); screens or types being rewritten, `inherits` with `Module.Name`; a
+  folder being emptied, `path`; an idiom, `pattern`. Add `in` for one area, and the epic's
+  tickets when the Atlassian tools are connected. Call `track_migration` (a dry run by default),
+  show the user the description, the counts and where they are, and save with `dry_run: false`
+  only after they agree. Never save, change or remove a definition unasked.
 
 ## MCP
 

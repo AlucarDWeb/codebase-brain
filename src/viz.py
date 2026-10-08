@@ -1727,14 +1727,16 @@ function migrationsTab() {
     const c = el('div', 'card');
     c.append(el('h2', null, H ? 'no migrations tracked yet' : 'no history yet'));
     const p = el('div', 'prose');
-    p.textContent = 'A migration is something the team wants gone: the imports of a module, the files under a folder, or the lines matching a pattern. ' +
-      'idxg counts it once a week on the history branch and lists the commits that moved the count. Track one from the project folder, then run idxg viz.';
+    p.textContent = 'A migration is something the team wants gone: the imports of a module, the files under a folder, the lines matching a pattern (counted weekly in git), ' +
+      'or the uses of a module and the subclasses of a type (counted from the code graph at every build). Add the Jira keys of its tickets to see how much of the plan has merged. Track one from the project folder, then run idxg viz.';
     c.append(p);
     for (const cmd of ['idxg migrations add "RxSwift removal" --imports RxSwift,RxCocoa,RxRelay',
-                       'idxg migrations add "Kernel removal" --path Modules/Legacy/Kernel']) {
+                       'idxg migrations add "RxSwift uses" --uses RxSwift,RxCocoa,RxRelay',
+                       'idxg migrations add "Kernel removal" --path Modules/Legacy/Kernel --tickets WPA-1 WPA-2']) {
       const row = el('div', 'migcmd'); const b = el('button', null, 'copy'); b.onclick = () => copyText(cmd, b);
       row.append(el('code', null, cmd), b); c.append(row);
     }
+    if (H) c.append(trackBox());
     s.append(c); return;
   }
   const web = H.meta.remote_web || '';
@@ -1745,33 +1747,47 @@ function migrationsTab() {
     const a = el('a', null, m.name); a.onclick = () => document.getElementById('mig' + i).scrollIntoView({ block: 'start' });
     const bar = el('div', 'migmeter'); bar.style.margin = '0';
     bar.append(migMeter(m), el('span', 'n', migPct(m)));
-    r.append(a, bar, el('span', 'loc', m.headline));
+    r.append(a, bar, el('span', 'loc', m.headline + (m.tickets && m.kind !== 'tickets' ? '; tickets: ' + m.ticket_line : '')));
     top.append(r);
   });
   top.append(el('div', 'loc', 'definitions live in this machine’s config; idxg migrations add, remove and show manage them, and idxg history build brings the counts up to date'));
+  top.append(trackBox());
   s.append(top);
   list.forEach((m, i) => s.append(migrationCard(m, i, web)));
+}
+function trackBox() {
+  const ask = 'Track a new migration: <say which one, e.g. the SwiftUI migration of Search>. Find the area with describe_module or search_graph, ' +
+    'pick the measure, read the epic’s tickets with the Atlassian tools if they are connected, run track_migration as a dry run, ' +
+    'show me what it would count and where, and save it only when I agree.';
+  return askBox([ask]);
 }
 function migrationCard(m, i, web) {
   const c = el('div', 'card mig'); c.id = 'mig' + i;
   c.append(el('h2', null, m.name));
   c.append(el('div', 'migline', m.headline));
   const mrow = el('div', 'migmeter'); mrow.append(migMeter(m), el('span', 'n', migPct(m))); c.append(mrow);
+  const isGit = ['imports', 'path', 'pattern'].includes(m.kind);
+  const T = m.tickets;
   const tiles = el('div', 'tiles');
-  for (const [n, k] of [[fmt(m.base), `${m.unit} ${m.base_is_peak ? 'at the peak, ' : 'on '}${m.base_day}`],
-                        [fmt(m.now), `${m.unit} on ${m.now_day}`], [fmt(m.peak.count), `peak, ${m.peak.day}`],
-                        [signed(m.change_4w), 'change, last 4 weeks'], [signed(m.change_12w), 'change, last 12 weeks'],
-                        [fmt(m.commits_total), `commits moved it: ${fmt(m.removing.commits)} removed ${fmt(m.removing.count)}, ${fmt(m.adding.commits)} added ${fmt(m.adding.count)}`]]) {
+  const tileList = m.kind === 'tickets' ? [] : m.samples.length < 2 ? [[fmt(m.now), `${m.unit} on ${m.now_day}, the first count`]] :
+    [[fmt(m.base), `${m.unit} ${m.base_is_peak ? 'at the peak, ' : 'on '}${m.base_day}`],
+     [fmt(m.now), `${m.unit} on ${m.now_day}`], [fmt(m.peak.count), `peak, ${m.peak.day}`],
+     [signed(m.change_4w), 'change, last 4 weeks'], [signed(m.change_12w), 'change, last 12 weeks']];
+  if (isGit) tileList.push([fmt(m.commits_total), `commits moved it: ${fmt(m.removing.commits)} removed ${fmt(m.removing.count)}, ${fmt(m.adding.commits)} added ${fmt(m.adding.count)}`]);
+  if (m.graph && m.graph.files != null) tileList.push([fmt(m.graph.files), m.kind === 'uses' ? `files, ${fmt(m.graph.occurrences)} occurrences` : `files; ${fmt(m.graph.direct)} inherit or conform directly`]);
+  if (T) tileList.push([`${T.merged} of ${T.total}`, `tickets with a merged commit${T.epic ? ', ' + T.epic : ''}`]);
+  if (T && T.latest_day) tileList.push([T.latest_day, 'latest ticket commit']);
+  for (const [n, k] of tileList) {
     if (n === '') continue;
     const d = el('div', 'tile'); d.append(el('div', 'n', n), el('div', 'k', k)); tiles.append(d);
   }
   c.append(tiles);
-  c.append(el('div', 'loc', `counts ${m.what}, once a week since ${m.since}; as of ${m.head_sha}, read ${(m.synced_at || '').replace('T', ' ')}`));
-  c.append(migChart(m));
-  if (!m.reconciled) c.append(el('div', 'loc', 'the commits below do not add up to the weekly counts (a pattern git and the browser read differently, or a merge diff), so the list is incomplete; the weekly counts come from the tree itself'));
+  c.append(el('div', 'loc', m.basis));
+  for (const note of m.notes) c.append(el('div', 'loc', note));
+  if (m.kind !== 'tickets' || (T && T.merged)) c.append(migChart(m));
 
-  const hasLeft = m.now > 0 && m.left.length;
-  const g = el('div', hasLeft ? 'grid2' : '');
+  const hasLeft = m.kind !== 'tickets' && m.now > 0 && m.left.length;
+  const g = el('div', hasLeft && isGit ? 'grid2' : '');
   const left = el('div');
   if (hasLeft) {
     left.append(el('h2', null, 'what is left, by module'));
@@ -1799,6 +1815,7 @@ function migrationCard(m, i, web) {
   }
 
   const right = el('div');
+  if (isGit) {
   right.append(el('h2', null, 'commits that moved the count'));
   right.append(el('div', 'loc', `first-parent commits on ${H.meta.branch || 'main'}, newest first; blue removed, orange added`));
   const rows = el('div', 'rows'); rows.style.maxHeight = '520px';
@@ -1828,9 +1845,14 @@ function migrationCard(m, i, web) {
   }
   if (m.commits_total > m.commits.length) right.append(el('div', 'loc', `the page holds the newest ${m.commits.length} of ${fmt(m.commits_total)}; idxg migrations show "${m.name}" --commits ${m.commits_total} lists every one`));
   g.append(right);
+  }
   c.append(g);
+  if (T) c.append(ticketsBlock(m, T, web));
 
   const prompts = [`Where does "${m.name}" stand? Use get_migrations with name "${m.name}" and summarise the trend, what is left by module, and the commits of the last month.`];
+  if (T && T.epic) prompts.push(`Check the ticket list of "${m.name}" against Jira: list the child tickets of ${T.epic} with the Atlassian tools, and if any key is missing from these ${T.total}, give me the idxg migrations add "${m.name}" --tickets ... command with the full list.`);
+  if (!T) prompts.push(`Find the Jira epic behind "${m.name}" with the Atlassian tools (search for ${m.spec.imports || m.spec.uses || m.spec.inherits || m.name}), list its child tickets, and give me the idxg migrations add "${m.name}" --epic <key> --tickets <keys> command to track them.`);
+  if (T && T.merged < T.total) prompts.push(`Which tickets of "${m.name}" have no merged commit yet (${T.items.filter(x => !x.commits).map(x => x.key).slice(0, 8).join(', ')}), and what does Jira say about each? Use the Atlassian tools.`);
   if (m.now > 0 && m.left.length) {
     const x = m.left[0];
     prompts.push(`Plan the next step of "${m.name}" in ${x.area}, which has ${fmt(x.count)} ${m.unit} left in ${fmt(x.files)} files (${fmt(x.tests)} in test files). Use get_migrations for the counts, describe_module ${x.area} for who depends on it, and check_usage before deleting anything.`);
@@ -1839,6 +1861,32 @@ function migrationCard(m, i, web) {
   c.append(askBox(prompts));
   return c;
 }
+function ticketsBlock(m, T, web) {
+  const box = el('div'); box.style.marginTop = '14px';
+  box.append(el('h2', null, `tickets${T.epic ? ' of ' + T.epic : ''}`));
+  if (m.kind !== 'tickets') {
+    const tm = el('div', 'migmeter'); const mt = el('div', 'meter'); const f = el('div', 'fill');
+    f.style.width = (T.progress || 0) + '%'; mt.append(f); tm.append(mt, el('span', 'n', (T.progress || 0) + '%')); box.append(tm);
+  }
+  box.append(el('div', 'loc', m.ticket_line));
+  const t = el('table');
+  t.innerHTML = '<thead><tr><th>ticket</th><th class="num">commits</th><th>merged</th><th>pull requests</th><th>first shipped</th></tr></thead>';
+  const tb = el('tbody');
+  for (const x of T.items) {
+    const tr = el('tr');
+    tr.append(el('td', null, x.key), numTd(x.commits));
+    tr.append(el('td', 'loc', x.commits ? (x.first_day === x.last_day ? x.first_day : `${x.first_day} .. ${x.last_day}`) : 'no merged commit yet'));
+    const prs = el('td');
+    for (const pr of x.prs.slice(0, 6)) {
+      if (web) { const a = el('a', 'ext', `#${pr}`); a.href = `${web}/pull/${pr}`; a.target = '_blank'; prs.append(a, document.createTextNode(' ')); }
+      else prs.append(document.createTextNode(`#${pr} `));
+    }
+    tr.append(prs, el('td', 'loc', x.release || ''));
+    tb.append(tr);
+  }
+  t.append(tb); box.append(t);
+  return box;
+}
 function migChart(m) {
   const NS = 'http://www.w3.org/2000/svg';
   const W = 1200, Hh = 190, padL = 56, padR = 18, padT = 14, padB = 24;
@@ -1846,7 +1894,7 @@ function migChart(m) {
   const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('class', 'migchart'); svg.setAttribute('viewBox', `0 0 ${W} ${Hh}`);
   const pts = m.samples.map(([d, n]) => [Date.parse(d + 'T00:00:00Z'), n, d]);
   wrap.append(svg);
-  if (pts.length < 2) return wrap;
+  if (pts.length < 2) return el('div');
   const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
   const top = Math.max(1, ...pts.map(p => p[1]));
   const step = Math.pow(10, Math.floor(Math.log10(top)));
