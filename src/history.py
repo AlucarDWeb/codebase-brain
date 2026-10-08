@@ -457,6 +457,8 @@ def build(root, graph_db, branch=None, first_parent=True, full=False, since=None
     _sync_releases(db, root, branch, release_tags or RELEASE_TAG_RE,
                    tuple(release_branches or RELEASE_BRANCH_PREFIXES), log=log)
     _sync_picks(db, root, branch, log=log)
+    import migrations
+    migrations.sync(db, root, branch, head, mapper, prj.migrations_for(root), log=log)
     if docs:
         sync_docs(db, root, branch, mapper, manifest_path, log=log)
     if prs:
@@ -1616,6 +1618,7 @@ def digest_text(data):
 def slice_for_viz(hdb_path, recent=60, churn_limit=40, weeks_limit=26, releases_limit=8):
     if not hdb_path or not os.path.exists(hdb_path):
         return None
+    import migrations
     db = connect(hdb_path)
     try:
         m = meta(db)
@@ -1640,6 +1643,7 @@ def slice_for_viz(hdb_path, recent=60, churn_limit=40, weeks_limit=26, releases_
             "template": digest_template(),
             "docs": [list(r) for r in db.execute(
                 """SELECT path, title, kind, module, published, bytes FROM docs ORDER BY kind, path LIMIT 1500""")],
+            "migrations": migrations.for_viz(db),
         }
     finally:
         db.close()

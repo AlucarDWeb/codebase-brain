@@ -29,6 +29,7 @@ Where to start:
 - Whether given symbols can be deleted: check_usage with the list; it prints the code at each use and already searches the unindexed files, so do not grep or open the sites again.
 - Who changed X and why: get_history with narrate. What one or more releases shipped, with each PR's what and why: get_history with release (comma-separated tags) and a path or module; get_digest with release for a narrated digest.
 - What the repo's own docs say: search_docs, then get_doc.
+- How far a tracked migration or removal has got (RxSwift, a legacy module), what is left and which commits moved it: get_migrations.
 - Anything else: query_graph with SQL, after get_schema.
 
 The graph is a snapshot of the last compile: index_status says whether it is behind and how much of the repo it covers. A file with no index records was never compiled, so search its text instead; check_usage does that search for you."""
@@ -262,6 +263,17 @@ TOOLS = [
                     "feature' is one call.",
      "inputSchema": {"type": "object", "properties": {
          "limit": {"type": "integer", "default": 30}, "db": DB_ARG}}},
+    {"name": "get_migrations",
+     "description": "Tracked migrations (removals the user set up with idxg migrations add: imports of a "
+                    "module, files under a path, or matching lines, counted weekly on the history branch). "
+                    "Without name: one line per migration with progress or the day it reached zero. With "
+                    "name: start, now and peak counts, the change over 4 and 12 weeks, what is left by "
+                    "module (with how much is in test files), and the commits that moved the count, each "
+                    "with its signed change, PR and release.",
+     "inputSchema": {"type": "object", "properties": {
+         "name": {"type": "string", "description": "one migration, by name or a unique part of it"},
+         "commits": {"type": "integer", "default": 20}, "left": {"type": "integer", "default": 15},
+         "db": DB_ARG}}},
     {"name": "get_churn",
      "description": "Where change concentrates: commits, lines and authors per module, component "
                     "directory, file or author over a window (default the last 365 days).",
@@ -404,6 +416,11 @@ def call(name, a):
                                       commits=a.get("commits", 5), max_bytes=a.get("max_bytes", 12000)))
     if name == "get_releases":
         return run(idxg.cmd_history_releases, ns(db=db, limit=a.get("limit", 30)))
+    if name == "get_migrations":
+        if a.get("name"):
+            return run(idxg.cmd_migrations_show, ns(db=db, name=a["name"], commits=a.get("commits", 20),
+                                                    left=a.get("left", 15)))
+        return run(idxg.cmd_migrations_list, ns(db=db))
     if name == "get_churn":
         return run(idxg.cmd_history_churn, ns(db=db, since=a.get("since"), by=a.get("by", "module"),
                                               ext=a.get("ext"), limit=a.get("limit", 25)))

@@ -207,6 +207,32 @@ output shows what
 changed near the crash, not why it crashed: the graph has no runtime data, so a force
 unwrap or a race is invisible to it.
 
+### Track a migration
+
+A migration here is something the team wants gone: every import of a module, every file
+under a folder, or every line matching a pattern. Tell `idxg` what to count and it follows
+the count week by week on the history branch:
+
+```bash
+idxg migrations add "RxSwift removal" --imports RxSwift,RxCocoa,RxRelay
+idxg migrations add "Kernel removal" --path Modules/Legacy/Kernel
+idxg migrations add "Observables" --pattern 'Observable<' --since 2026-01-01
+idxg migrations                                # one line per migration
+idxg migrations show rx                        # the full report
+```
+
+```
+Kernel removal: done: 2,068 imports on 2025-10-08, none since 2026-09-30 with e85ad54ffc5 (#22089)
+RxSwift removal: 5,095 imports left, 251 more than the 4,844 on 2025-10-08
+```
+
+`show` and the explorer's migrations tab add the weekly counts as a chart, what is left by
+module (with how much of it sits in test files), and every commit that moved the count,
+with what it removed or added, its pull request and its release. Definitions live in this
+machine's config, never in the repository. Each one keeps the start date it was added
+with (a year back unless you pass `--since`), so the starting count never drifts.
+`idxg history build` brings the counts up to date, reading only the commits since the last run.
+
 ### Command reference
 
 Every query command accepts `--json`, and `--db` to target another project, given as its
@@ -247,6 +273,8 @@ idxg history releases                         # version tags and what shipped in
 idxg history churn --by module                # where change concentrated this year
 idxg history timeline --periods 4             # the project's story, one paragraph per period
 idxg history vault --out ~/my-vault           # export as knowledge-vault clippings
+idxg migrations add "RxSwift removal" --imports RxSwift   # count something down to zero
+idxg migrations show "RxSwift removal"        # progress, what is left by module, commits
 idxg docs list --module MyModule
 idxg docs search "path resolver"
 idxg docs show Documentation/Testing.md
@@ -343,6 +371,7 @@ Every MCP tool has a CLI equivalent. `idxg schema` (or `get_schema`) prints ever
 | What shipped this week, or in one release, narrated | `get_digest` | `idxg history digest` |
 | Release tags and what first shipped in each | `get_releases` | `idxg history releases` |
 | How the project evolved, period by period | `get_timeline` | `idxg history timeline` |
+| How far a tracked migration has got, what is left by module, which commits moved it | `get_migrations` | `idxg migrations show` |
 | A crash report, frame by frame | `triage_crash` | `idxg crash` |
 | The repository's docs | `list_docs`, `search_docs`, `get_doc` | `idxg docs` |
 | Any SQL over the graph | `query_graph` | `idxg sql` |
@@ -358,6 +387,9 @@ Every MCP tool has a CLI equivalent. `idxg schema` (or `get_schema`) prints ever
 - `--symbol` history follows the file that defines the symbol, so unrelated edits to that
   file show up too.
 - Each checkout gets its own database, because Bazel output bases differ per worktree.
+- A migration counts text in git, not the graph: an import that is still there but no longer
+  used counts as left, and code moved to a replacement counts as progress only once the old
+  import or file is gone.
 
 ## Troubleshooting
 
@@ -390,6 +422,7 @@ A project skill with a `## Project notes` section is kept unless you pass `--for
 | `src/build.py` | parallel extractor and SQLite writer |
 | `src/project.py` | project registry, store detection, config and staleness |
 | `src/history.py` | git log, PR descriptions, docs, narration, digest, timeline, vault export |
+| `src/migrations.py` | weekly counts and commits behind `idxg migrations` |
 | `src/crash.py` | stack trace parsing and frame resolution |
 | `src/deadcode.py` | the dead-code candidate query |
 | `src/modulecard.py` | the module card behind `idxg module` |

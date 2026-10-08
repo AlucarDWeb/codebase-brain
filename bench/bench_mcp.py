@@ -87,6 +87,7 @@ CALLS = [
     ("get_releases", {"limit": 10}),
     ("find_dead_code", {"test_only": True, "limit": 20}),
     ("get_churn", {}),
+    ("get_migrations", {}),
     ("get_timeline", {"periods": 3}),
     ("list_docs", {"kind": "readme"}),
     ("search_docs", {"query": "architecture"}),

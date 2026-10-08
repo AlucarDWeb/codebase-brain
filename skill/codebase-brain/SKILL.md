@@ -41,6 +41,7 @@ below only when the server is not connected or when a flag has no tool equivalen
 | a crash report or stack trace to triage | `idxg crash <trace> --since <previous release tag>` (MCP `triage_crash`) |
 | which release first shipped a change, what is in one or more releases | `idxg history log <path> --release <tag>,<tag>` (MCP `get_history` with `release`: cut points, windows, picks, each PR's what and why), `idxg history releases`, `idxg history digest --release <tag>` |
 | code only tests keep alive | `idxg dead --test-only` (MCP `find_dead_code` with `test_only`) |
+| how far a migration or removal has got (RxSwift, a legacy module), what is left by module, which commits moved it | `idxg migrations show <name>` (MCP `get_migrations`); `idxg migrations` lists them |
 
 ## Commands
 
@@ -78,6 +79,9 @@ idxg docs show Documentation/Testing.md --max-bytes 8000
 idxg crash crash.txt --since v1.328.0                 # per frame: symbol, callers, commits since the tag
 idxg history build                                    # pull new commits, resync docs
 idxg history vault --out <vault dir>                  # clippings for a knowledge vault
+idxg migrations                                       # tracked migrations, one line each
+idxg migrations show "RxSwift removal"                # progress, weekly counts, what is left, commits
+idxg migrations add "Kernel removal" --path Modules/Legacy/Kernel   # or --imports A,B, or --pattern RE
 idxg deinit --purge                                   # un-index a project completely
 ```
 
@@ -225,6 +229,13 @@ Treat the output as the list of places and pull requests to read first.
   `source: repo-doc` or `source: git-history` frontmatter and never rewrites a file; a
   changed source becomes a date-suffixed clipping. Closed periods are stable, so only the
   current period and changed docs produce new files on re-run.
+- **Migrations are counted in git, not in the graph.** Each one is the user's own
+  definition (imports of modules, files under a path, or lines matching a pattern), kept in
+  this machine's config, counted on the history branch at each week's last commit since its
+  start date. The commits listed are the ones whose diff changed the count, each with what it
+  removed or added; their sum reconciles with the weekly counts, and the report says when it
+  does not. An import that is still written but no longer used counts as left. Add or remove
+  definitions only when the user asks; `get_migrations` is read-only.
 
 ## MCP
 
@@ -232,6 +243,6 @@ Tools: `index_status`, `describe_module`, `impact_of`, `check_usage`, `search_gr
 `get_code_snippet`, `query_graph`, `check_index_coverage`, `get_architecture`,
 `get_schema`, `build_visualizer`; history and docs: `get_history`, `get_commit`,
 `get_churn`, `get_timeline`, `get_digest`, `get_releases`, `list_docs`, `search_docs`,
-`get_doc`, `refresh_history`; crash triage: `triage_crash`. `get_history` with `narrate: true` gives
+`get_doc`, `refresh_history`, `get_migrations`; crash triage: `triage_crash`. `get_history` with `narrate: true` gives
 one paragraph per commit. The server resolves the database from the session's
 working directory; pass `db` to override.

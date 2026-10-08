@@ -147,6 +147,20 @@ def unset_config(key, root=None):
     return None
 
 
+def migrations_for(root):
+    """Tracked migrations of one checkout; local to this machine, in the project registry."""
+    return list((load_registry().get(os.path.realpath(root), {}) or {}).get("migrations") or [])
+
+
+def save_migrations(root, items):
+    reg = load_registry()
+    rr = os.path.realpath(root)
+    if rr not in reg:
+        raise SystemExit(f"{rr} is not an indexed project; run idxg init there first")
+    reg[rr]["migrations"] = items
+    save_registry(reg)
+
+
 def _read_json(path):
     if os.path.exists(path):
         try:

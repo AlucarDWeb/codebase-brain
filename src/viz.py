@@ -8,10 +8,11 @@ TEMPLATE_HEAD = """<meta charset="utf-8">
   --bg:#0d1117; --panel:#141b24; --panel2:#1b2430; --line:#243040; --fg:#d6e2f0;
   --dim:#7d8da3; --accent:#4dd4c0; --accent2:#7aa2f7; --warn:#e0af68; --pink:#f7768e;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --mig-down:#5b8def; --mig-up:#c07a30;
 }
 :root[data-theme="light"]{
   --bg:#f6f8fa; --panel:#fff; --panel2:#eef2f6; --line:#d5dde6; --fg:#1b2430;
-  --dim:#5b6b80; --accent:#0f8b7a; --accent2:#2f5fd0;
+  --dim:#5b6b80; --accent:#0f8b7a; --accent2:#2f5fd0; --mig-down:#2f5fd0; --mig-up:#c4701c;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.5}
@@ -122,6 +123,37 @@ footer{color:var(--dim);font-size:11px;padding:14px 18px;border-top:1px solid va
 .sha{color:var(--dim);font-size:11px}
 a.ext{color:var(--accent2);text-decoration:none}
 a.ext:hover{text-decoration:underline}
+.mig{margin-top:14px}
+.migline{font-size:14px;margin:0 0 4px}
+.migmeter{display:flex;align-items:center;gap:10px;margin:8px 0 14px}
+.migmeter .n{font-variant-numeric:tabular-nums;min-width:56px;text-align:right;font-size:14px;font-weight:600}
+.mig .migmeter .n{font-size:20px;min-width:72px}
+.meter{flex:1;height:16px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.mig .meter{height:28px}
+.meter .fill{height:100%;background:var(--accent);border-radius:0 4px 4px 0}
+.migrow{display:grid;grid-template-columns:minmax(140px,220px) minmax(120px,1fr) minmax(0,2fr);gap:12px;align-items:center;padding:6px 0;border-top:1px dotted var(--line)}
+.migrow:first-of-type{border-top:none}
+.migrow a{color:var(--accent2);cursor:pointer}
+@media(max-width:800px){.migrow{grid-template-columns:1fr}}
+.migchartwrap{position:relative;margin:6px 0 14px}
+svg.migchart{height:auto;aspect-ratio:1200/190;display:block}
+.migchart .grid{stroke:var(--line)}
+.migchart .ax{fill:var(--dim);font-size:10px}
+.migchart .lab{fill:var(--fg);font-size:11px}
+.migchart .ln{fill:none;stroke:var(--accent2);stroke-width:2;stroke-linejoin:round}
+.migchart .area{fill:var(--accent2);fill-opacity:.12}
+.migchart .dot{fill:var(--accent2);stroke:var(--panel);stroke-width:2}
+.migchart .cross{stroke:var(--dim);stroke-dasharray:3 3}
+.migtip{position:absolute;top:6px;pointer-events:none;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:3px 8px;font-size:11px;white-space:nowrap;display:none}
+.mcrow{display:grid;grid-template-columns:84px 124px minmax(0,1fr) auto;gap:8px;align-items:baseline;padding:4px 6px;border-radius:4px}
+.mcrow:hover{background:var(--panel2)}
+.mcrow .loc{white-space:nowrap;text-align:right}
+.chg{display:inline-flex;align-items:center;gap:6px}
+.chg .num{min-width:52px}
+.chg i{display:inline-block;height:6px;border-radius:3px}
+.migcmd{display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap}
+.migcmd code{background:var(--panel2);border:1px solid var(--line);padding:3px 8px;border-radius:4px}
+.migcmd button{background:var(--panel);border:1px solid var(--line);color:var(--accent2);font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:4px;cursor:pointer}
 </style>
 """
 
@@ -354,6 +386,7 @@ BODY = """
   <button data-tab="dead">dead code</button>
   <button data-tab="graph">graph</button>
   <button data-tab="history">history</button>
+  <button data-tab="migrations">migrations</button>
   <button data-tab="docs">docs</button>
 </nav>
 <main>
@@ -363,6 +396,7 @@ BODY = """
   <section id="dead" hidden></section>
   <section id="graph" hidden></section>
   <section id="history" hidden></section>
+  <section id="migrations" hidden></section>
   <section id="docs" hidden></section>
 </main>
 <footer>
@@ -502,6 +536,7 @@ function overview() {
     const recent = [...H.docs].filter(d => d[4]).sort((a, b) => b[4] < a[4] ? -1 : 1).slice(0, 3);
     items.append(item(`${fmt(H.docs.length)} documents the repo writes about itself`, 'most recently changed: ' + recent.map(d => `${d[1] || d[0]} (${d[4]})`).join(', '), () => showTab('docs')));
   }
+  if (H && H.migrations && H.migrations.length) items.append(item(`${H.migrations.length} tracked migration${H.migrations.length === 1 ? '' : 's'}`, H.migrations.map(x => `${x.name}: ${x.headline}`).join('; '), () => showTab('migrations')));
   if (H) items.append(item('the story, period by period', `${H.narrative.length} ${H.granularity}s of computed history, from ${H.meta.first_day}`, () => showTab('history')));
   look.append(items);
   g2.append(look);
@@ -1669,6 +1704,199 @@ function activityChart() {
   return svg;
 }
 
+/* ---------- migrations ---------- */
+const signed = n => n == null ? '' : n > 0 ? '+' + fmt(n) : fmt(n);
+function migMeter(m) {
+  const wrap = el('div', 'meter');
+  const fill = el('div', 'fill');
+  fill.style.width = (m.progress == null ? 0 : Math.max(0, Math.min(100, m.progress))) + '%';
+  wrap.append(fill); wrap.title = m.headline;
+  return wrap;
+}
+function migPct(m) {
+  if (m.done) return '100%';
+  if (m.progress == null) return '';
+  return Math.max(0, m.progress) + '%';
+}
+function migrationsTab() {
+  const s = document.getElementById('migrations');
+  if (s.dataset.init) return;
+  s.dataset.init = '1';
+  const list = (H && H.migrations) || [];
+  if (!list.length) {
+    const c = el('div', 'card');
+    c.append(el('h2', null, H ? 'no migrations tracked yet' : 'no history yet'));
+    const p = el('div', 'prose');
+    p.textContent = 'A migration is something the team wants gone: the imports of a module, the files under a folder, or the lines matching a pattern. ' +
+      'idxg counts it once a week on the history branch and lists the commits that moved the count. Track one from the project folder, then run idxg viz.';
+    c.append(p);
+    for (const cmd of ['idxg migrations add "RxSwift removal" --imports RxSwift,RxCocoa,RxRelay',
+                       'idxg migrations add "Kernel removal" --path Modules/Legacy/Kernel']) {
+      const row = el('div', 'migcmd'); const b = el('button', null, 'copy'); b.onclick = () => copyText(cmd, b);
+      row.append(el('code', null, cmd), b); c.append(row);
+    }
+    s.append(c); return;
+  }
+  const web = H.meta.remote_web || '';
+  const top = el('div', 'card');
+  top.append(el('h2', null, `${list.length} tracked migration${list.length === 1 ? '' : 's'}`));
+  list.forEach((m, i) => {
+    const r = el('div', 'migrow');
+    const a = el('a', null, m.name); a.onclick = () => document.getElementById('mig' + i).scrollIntoView({ block: 'start' });
+    const bar = el('div', 'migmeter'); bar.style.margin = '0';
+    bar.append(migMeter(m), el('span', 'n', migPct(m)));
+    r.append(a, bar, el('span', 'loc', m.headline));
+    top.append(r);
+  });
+  top.append(el('div', 'loc', 'definitions live in this machine’s config; idxg migrations add, remove and show manage them, and idxg history build brings the counts up to date'));
+  s.append(top);
+  list.forEach((m, i) => s.append(migrationCard(m, i, web)));
+}
+function migrationCard(m, i, web) {
+  const c = el('div', 'card mig'); c.id = 'mig' + i;
+  c.append(el('h2', null, m.name));
+  c.append(el('div', 'migline', m.headline));
+  const mrow = el('div', 'migmeter'); mrow.append(migMeter(m), el('span', 'n', migPct(m))); c.append(mrow);
+  const tiles = el('div', 'tiles');
+  for (const [n, k] of [[fmt(m.base), `${m.unit} ${m.base_is_peak ? 'at the peak, ' : 'on '}${m.base_day}`],
+                        [fmt(m.now), `${m.unit} on ${m.now_day}`], [fmt(m.peak.count), `peak, ${m.peak.day}`],
+                        [signed(m.change_4w), 'change, last 4 weeks'], [signed(m.change_12w), 'change, last 12 weeks'],
+                        [fmt(m.commits_total), `commits moved it: ${fmt(m.removing.commits)} removed ${fmt(m.removing.count)}, ${fmt(m.adding.commits)} added ${fmt(m.adding.count)}`]]) {
+    if (n === '') continue;
+    const d = el('div', 'tile'); d.append(el('div', 'n', n), el('div', 'k', k)); tiles.append(d);
+  }
+  c.append(tiles);
+  c.append(el('div', 'loc', `counts ${m.what}, once a week since ${m.since}; as of ${m.head_sha}, read ${(m.synced_at || '').replace('T', ' ')}`));
+  c.append(migChart(m));
+  if (!m.reconciled) c.append(el('div', 'loc', 'the commits below do not add up to the weekly counts (a pattern git and the browser read differently, or a merge diff), so the list is incomplete; the weekly counts come from the tree itself'));
+
+  const hasLeft = m.now > 0 && m.left.length;
+  const g = el('div', hasLeft ? 'grid2' : '');
+  const left = el('div');
+  if (hasLeft) {
+    left.append(el('h2', null, 'what is left, by module'));
+    left.append(el('div', 'loc', 'a module from the compiled graph, or a directory (ending in /) where the graph has none; test files are counted apart'));
+    const t = el('table');
+    t.innerHTML = `<thead><tr><th>where</th><th class="num">${m.unit}</th><th></th><th class="num">files</th><th class="num">${m.unit} in tests</th></tr></thead>`;
+    const tb = el('tbody'); const max = Math.max(...m.left.map(x => x.count));
+    const rowsFor = n => {
+      tb.innerHTML = '';
+      for (const x of m.left.slice(0, n)) {
+        const tr = el('tr'); const td = el('td');
+        if (x.in_graph) { const a = el('a', null, x.area); a.style.color = 'var(--accent2)'; a.style.cursor = 'pointer'; a.onclick = () => { showTab('symbols'); setModule(x.area); }; td.append(a); }
+        else td.textContent = x.area + '/';
+        const bt = el('td'); const b = el('span', 'bar'); b.style.width = Math.max(2, Math.round(120 * x.count / max)) + 'px'; bt.append(b);
+        tr.append(td, numTd(x.count), bt, numTd(x.files), numTd(x.tests)); tb.append(tr);
+      }
+    };
+    rowsFor(15); t.append(tb); left.append(t);
+    if (m.left.length > 15) {
+      const more = el('a', null, `show all ${m.left.length}`); more.style.cssText = 'color:var(--accent2);cursor:pointer;font-size:11px';
+      more.onclick = () => { rowsFor(m.left.length); more.remove(); }; left.append(more);
+    }
+    if (m.left_total_areas > m.left.length) left.append(el('div', 'loc', `the page holds the largest ${m.left.length} of ${m.left_total_areas} areas; idxg migrations show "${m.name}" --left ${m.left_total_areas} lists every one`));
+    g.append(left);
+  }
+
+  const right = el('div');
+  right.append(el('h2', null, 'commits that moved the count'));
+  right.append(el('div', 'loc', `first-parent commits on ${H.meta.branch || 'main'}, newest first; blue removed, orange added`));
+  const rows = el('div', 'rows'); rows.style.maxHeight = '520px';
+  const maxAbs = Math.max(1, ...m.commits.map(x => Math.abs(x.change)));
+  const commitRows = n => {
+    rows.innerHTML = '';
+    for (const x of m.commits.slice(0, n)) {
+      const r = el('div', 'mcrow');
+      const chg = el('span', 'chg'); const bar = el('i');
+      bar.style.width = Math.max(2, Math.round(60 * Math.abs(x.change) / maxAbs)) + 'px';
+      bar.style.background = x.change < 0 ? 'var(--mig-down)' : 'var(--mig-up)';
+      chg.append(el('span', 'num', signed(x.change)), bar);
+      const subj = el('span', 'subj', x.subject + ' ');
+      if (x.release) subj.append(el('span', 'badge', x.release));
+      r.append(el('span', 'sha', x.day), chg, subj);
+      const meta = el('span', 'loc');
+      if (x.author) meta.append(document.createTextNode(x.author + ' '));
+      if (x.pr && web) { const a = el('a', 'ext', `#${x.pr}`); a.href = `${web}/pull/${x.pr}`; a.target = '_blank'; meta.append(a); }
+      else meta.append(document.createTextNode(x.pr ? `#${x.pr}` : x.sha));
+      r.append(meta); rows.append(r);
+    }
+  };
+  commitRows(25); right.append(rows);
+  if (m.commits.length > 25) {
+    const more = el('a', null, `show all ${m.commits.length}`); more.style.cssText = 'color:var(--accent2);cursor:pointer;font-size:11px';
+    more.onclick = () => { commitRows(m.commits.length); more.remove(); }; right.append(more);
+  }
+  if (m.commits_total > m.commits.length) right.append(el('div', 'loc', `the page holds the newest ${m.commits.length} of ${fmt(m.commits_total)}; idxg migrations show "${m.name}" --commits ${m.commits_total} lists every one`));
+  g.append(right);
+  c.append(g);
+
+  const prompts = [`Where does "${m.name}" stand? Use get_migrations with name "${m.name}" and summarise the trend, what is left by module, and the commits of the last month.`];
+  if (m.now > 0 && m.left.length) {
+    const x = m.left[0];
+    prompts.push(`Plan the next step of "${m.name}" in ${x.area}, which has ${fmt(x.count)} ${m.unit} left in ${fmt(x.files)} files (${fmt(x.tests)} in test files). Use get_migrations for the counts, describe_module ${x.area} for who depends on it, and check_usage before deleting anything.`);
+  }
+  if (m.adding.commits) prompts.push(`Which recent commits added ${m.unit} back to "${m.name}", and why? get_migrations lists them with their PRs; get_commit gives the description of the newest three.`);
+  c.append(askBox(prompts));
+  return c;
+}
+function migChart(m) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const W = 1200, Hh = 190, padL = 56, padR = 18, padT = 14, padB = 24;
+  const wrap = el('div', 'migchartwrap');
+  const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('class', 'migchart'); svg.setAttribute('viewBox', `0 0 ${W} ${Hh}`);
+  const pts = m.samples.map(([d, n]) => [Date.parse(d + 'T00:00:00Z'), n, d]);
+  wrap.append(svg);
+  if (pts.length < 2) return wrap;
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+  const top = Math.max(1, ...pts.map(p => p[1]));
+  const step = Math.pow(10, Math.floor(Math.log10(top)));
+  const ymax = Math.ceil(top / step) * step;
+  const X = t => padL + (t - t0) / Math.max(1, t1 - t0) * (W - padL - padR);
+  const Y = n => padT + (1 - n / ymax) * (Hh - padT - padB);
+  const mk = (tag, attrs, txt) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (txt !== undefined) e.textContent = txt; svg.append(e); return e; };
+  for (const v of [0, ymax / 2, ymax]) {
+    mk('line', { x1: padL, x2: W - padR, y1: Y(v), y2: Y(v), class: 'grid' });
+    mk('text', { x: padL - 8, y: Y(v) + 3, 'text-anchor': 'end', class: 'ax' }, fmt(v));
+  }
+  const months = [];
+  const d0 = new Date(t0);
+  for (let d = new Date(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth() + 1, 1)); d.getTime() <= t1; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) months.push(d);
+  const every = Math.max(1, Math.ceil(months.length / 12));
+  months.forEach((d, k) => {
+    if (k % every) return;
+    const label = d.getUTCMonth() === 0 ? String(d.getUTCFullYear()) : d.toLocaleString('en', { month: 'short', timeZone: 'UTC' });
+    mk('text', { x: X(d.getTime()), y: Hh - 6, 'text-anchor': 'middle', class: 'ax' }, label);
+  });
+  const line = pts.map((p, k) => `${k ? 'L' : 'M'}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join('');
+  mk('path', { d: `${line}L${X(t1).toFixed(1)},${Y(0)}L${X(t0).toFixed(1)},${Y(0)}Z`, class: 'area' });
+  mk('path', { d: line, class: 'ln' });
+  if (m.done && m.done.day) {
+    const t = Date.parse(m.done.day + 'T00:00:00Z');
+    mk('circle', { cx: X(t), cy: Y(0), r: 5, class: 'dot' });
+    mk('text', { x: Math.min(X(t), W - padR - 4), y: Y(0) - 10, 'text-anchor': 'end', class: 'lab' }, `zero on ${m.done.day}`);
+  }
+  const cross = mk('line', { y1: padT, y2: Hh - padB, class: 'cross' }); cross.style.display = 'none';
+  const dot = mk('circle', { r: 4, class: 'dot' }); dot.style.display = 'none';
+  const hit = mk('rect', { x: padL, y: 0, width: W - padL - padR, height: Hh, fill: 'transparent' });
+  const tip = el('div', 'migtip'); wrap.append(tip);
+  hit.addEventListener('mousemove', e => {
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const x = pt.matrixTransform(svg.getScreenCTM().inverse()).x;
+    let k = 0; for (let j = 1; j < pts.length; j++) if (Math.abs(X(pts[j][0]) - x) < Math.abs(X(pts[k][0]) - x)) k = j;
+    const [t, n, d] = pts[k];
+    cross.setAttribute('x1', X(t)); cross.setAttribute('x2', X(t)); cross.style.display = '';
+    dot.setAttribute('cx', X(t)); dot.setAttribute('cy', Y(n)); dot.style.display = '';
+    const prev = k ? n - pts[k - 1][1] : null;
+    tip.textContent = `${d}: ${fmt(n)} ${m.unit}` + (prev != null ? ` (${signed(prev)} on the week before)` : '');
+    const box = wrap.getBoundingClientRect();
+    const left = e.clientX - box.left + 14;
+    tip.style.display = 'block';
+    tip.style.left = Math.min(left, box.width - tip.offsetWidth - 4) + 'px';
+  });
+  hit.addEventListener('mouseleave', () => { cross.style.display = 'none'; dot.style.display = 'none'; tip.style.display = 'none'; });
+  return wrap;
+}
+
 /* ---------- docs ---------- */
 function docsTab() {
   const s = document.getElementById('docs');
@@ -2468,7 +2696,7 @@ function graphEdges(links) {
 /* ---------- tabs ---------- */
 function showTab(name) {
   for (const b of document.querySelectorAll('nav button')) b.classList.toggle('on', b.dataset.tab === name);
-  for (const id of ['overview', 'modules', 'symbols', 'dead', 'graph', 'history', 'docs'])
+  for (const id of ['overview', 'modules', 'symbols', 'dead', 'graph', 'history', 'migrations', 'docs'])
     document.getElementById(id).hidden = id !== name;
   if (name === 'modules' && !modState) modulesTab();
   if (name === 'modules' && modState && modState.svg && !modState.svg.isConnected) modulesTab();
@@ -2477,6 +2705,7 @@ function showTab(name) {
   if (name === 'dead') deadTab();
   if (name === 'graph') graphTab();
   if (name === 'history') historyTab();
+  if (name === 'migrations') migrationsTab();
   if (name === 'docs') docsTab();
 }
 for (const b of document.querySelectorAll('nav button')) b.onclick = () => showTab(b.dataset.tab);

@@ -1178,6 +1178,9 @@ def cmd_schema(a):
     -- commit_files.module comes from the graph's module directory prefixes, NULL when uncompiled
     -- components: module-depth directories; alive=0 means the branch no longer has the directory
     -- module_rank: cross-module CALLS in/out per module, used to order digest areas
+    -- migrations*: one set per tracked migration (idxg migrations add); migration_samples.count is
+    --   the count at that week's last first-parent commit, migration_commits.added/removed what
+    --   each commit changed, migration_left the count at the head per module or directory
     """).strip())
     h.close()
 
@@ -1794,6 +1797,87 @@ def cmd_docs_show(a):
         print(body)
 
 
+def _migrations_module():
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import migrations
+    return migrations
+
+
+def cmd_migrations_list(a):
+    mig = _migrations_module()
+    hist, hdb = history_db(a)
+    root, _ = _history_config(a)
+    names = mig.names(hdb)
+    pending = [m["name"] for m in prj.migrations_for(root) if m.get("name") not in names]
+    if getattr(a, "json", False):
+        print(json.dumps({"migrations": [mig.summary(hdb, n, 20, 15) for n in names], "not_counted": pending}, indent=1))
+        return
+    if not names and not pending:
+        print("no migrations tracked yet. Add one, for example:\n"
+              "  idxg migrations add \"RxSwift removal\" --imports RxSwift,RxCocoa,RxRelay\n"
+              "  idxg migrations add \"Kernel removal\" --path Modules/Legacy/Kernel")
+        return
+    for n in names:
+        print(f"{n}: {mig.headline(mig.summary(hdb, n, 0, 0))}")
+    for n in pending:
+        print(f"{n}: not counted yet; idxg history build counts it")
+    print("\n  idxg migrations show <name> lists what is left by module and the commits that moved it")
+
+
+def cmd_migrations_show(a):
+    mig = _migrations_module()
+    hist, hdb = history_db(a)
+    s = mig.summary(hdb, mig.find(hdb, a.name))
+    if getattr(a, "json", False):
+        print(json.dumps(s, indent=1))
+        return
+    print(mig.report_text(s, commits=a.commits, left=a.left))
+
+
+def cmd_migrations_add(a):
+    hist, mig = _history_module(), _migrations_module()
+    graph = db_path(a.db)
+    root, _ = _history_config(a)
+    try:
+        spec = mig.normalize({"name": a.name, "imports": a.imports, "path": a.path, "pattern": a.pattern,
+                              "files": a.files, "since": a.since})
+    except (ValueError, re.error) as e:
+        raise SystemExit(f"cannot track {a.name!r}: {e}")
+    before = prj.migrations_for(root)
+    items = [m for m in before if m.get("name") != spec["name"]] + [spec]
+    prj.save_migrations(root, items)
+    verb = "updated" if len(items) == len(before) else "tracking"
+    print(f"{verb} {spec['name']}: {mig.describe(spec)}, from {spec['since']}")
+    hp = hist.history_db_for(graph)
+    if not os.path.exists(hp):
+        print("  no history db yet; idxg history build counts it")
+        return
+    branch = hist.meta(hist.connect(hp)).get("branch") or hist.resolve_branch(root)
+    mig.refresh(hp, root, branch, graph, items)
+    print()
+    print(mig.report_text(mig.summary(hist.connect(hp), spec["name"]), commits=10, left=10))
+    print("\n  idxg viz (or idxg open) shows it in the explorer's migrations tab")
+
+
+def cmd_migrations_remove(a):
+    hist, mig = _history_module(), _migrations_module()
+    root, _ = _history_config(a)
+    items = prj.migrations_for(root)
+    hits = [m["name"] for m in items if m.get("name", "").lower() == a.name.lower()]
+    if not hits:
+        known = ", ".join(m.get("name", "") for m in items) or "none"
+        raise SystemExit(f"no migration named {a.name!r}; tracked: {known}")
+    prj.save_migrations(root, [m for m in items if m.get("name") != hits[0]])
+    hp = hist.history_db_for(db_path(a.db))
+    if os.path.exists(hp):
+        mig.drop(hp, hits[0])
+    print(f"stopped tracking {hits[0]}")
+
+
+def cmd_migrations(a):
+    (getattr(a, "mfn", None) or cmd_migrations_list)(a)
+
+
 def cmd_history(a):
     a.hfn(a)
 
@@ -1911,6 +1995,9 @@ def install_project_skill(root, db_file):
                         f"{hm.get('first_day')} to {hm.get('last_day')}, with pull request descriptions, and "
                         f"{int(hm.get('count_docs') or 0)} markdown documents from the repository.")
     lang_line = ", ".join(f"{k} {v:,}" for k, v in sorted(langs.items(), key=lambda kv: -kv[1]) if k)
+    tracked = [m.get("name") for m in prj.migrations_for(root) if m.get("name")]
+    migration_line = (f"\n- Migrations tracked on this machine: {', '.join(tracked)}; `get_migrations` says how far each has got."
+                      if tracked else "")
     body = f"""---
 name: {skill_name}
 description: Facts about {name}'s code graph, commit history and docs as indexed by codebase-brain (coverage, largest modules, history reach) plus this project's own notes. Use together with the codebase-brain skill for who calls X, who changed X and why, what shipped, crash triage, or what the repo's docs say.
@@ -1928,10 +2015,10 @@ from https://github.com/AlucarDWeb/codebase-brain and run `idxg init` here.
 - {n['symbols']:,} symbols and {n['edges']:,} edges across {n['files']:,} indexed files ({lang_line}),
   as of the last build on this machine; `index_status` gives the current numbers.
 - {coverage}
-- {history_line}
+- {history_line}{migration_line}
 - Largest modules: {', '.join(mods[:12])}.
 
-Explorer: `idxg open` (overview, module graph, symbols, dead code, history, docs).
+Explorer: `idxg open` (overview, module graph, symbols, dead code, history, migrations, docs).
 
 {NOTES_MARKER}
 
@@ -2588,6 +2675,33 @@ def build_parser():
     h.add_argument("--dry-run", action="store_true")
     h.set_defaults(hfn=cmd_history_vault)
     p.set_defaults(fn=cmd_history, no_stale_check=True)
+
+    p = sub.add_parser("migrations", help="track removals week by week: imports of a module, files under a path, matching lines")
+    ms = p.add_subparsers(dest="mcmd")
+    m = ms.add_parser("list", help="every tracked migration and where it stands (the default)")
+    m.add_argument("--json", action="store_true")
+    m.set_defaults(mfn=cmd_migrations_list)
+    m = ms.add_parser("show", help="one migration: progress, what is left by module, the commits that moved it")
+    m.add_argument("name", help="its name, or a unique part of it")
+    m.add_argument("--commits", type=int, default=30, help="commits listed, newest first")
+    m.add_argument("--left", type=int, default=20, help="modules listed in what is left")
+    m.add_argument("--json", action="store_true")
+    m.set_defaults(mfn=cmd_migrations_show)
+    m = ms.add_parser("add", help="start tracking one; stored in this machine's config, never in the repo")
+    m.add_argument("name", help="what to call it, e.g. \"RxSwift removal\"")
+    g = m.add_mutually_exclusive_group(required=True)
+    g.add_argument("--imports", help="comma-separated modules whose import lines should reach zero")
+    g.add_argument("--path", help="a directory whose tracked files should reach zero")
+    g.add_argument("--pattern", help="an extended regex, as git grep -E reads it, whose matching lines should reach zero")
+    m.add_argument("--files", nargs="+", metavar="PATHSPEC",
+                   help="git pathspecs searched by --imports and --pattern (default *.swift *.m *.mm *.h; "
+                        "':(exclude)Pods' works)")
+    m.add_argument("--since", help="YYYY-MM-DD the count starts from (default: a year ago today)")
+    m.set_defaults(mfn=cmd_migrations_add)
+    m = ms.add_parser("remove", help="stop tracking one and drop its counts")
+    m.add_argument("name")
+    m.set_defaults(mfn=cmd_migrations_remove)
+    p.set_defaults(fn=cmd_migrations, no_stale_check=True)
 
     p = sub.add_parser("docs", help="the repository's own markdown docs, searchable")
     ds = p.add_subparsers(dest="dcmd", required=True)
